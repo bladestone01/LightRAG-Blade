@@ -788,6 +788,11 @@ async def kg_query(
         system_prompt=sys_prompt,
         stream=query_param.stream,
     )
+
+    if query_param.stream:
+        logger.info(f"Streaming response: {response}")
+        return response
+
     if isinstance(response, str) and len(response) > len(sys_prompt):
         response = (
             response.replace(sys_prompt, "")
@@ -1820,7 +1825,12 @@ async def naive_query(
     response = await use_model_func(
         query,
         system_prompt=sys_prompt,
+        stream=query_param.stream,
     )
+
+    if query_param.stream:
+        logger.info(f"[naive_query]Streaming Response:{response}")
+        return response
 
     if len(response) > len(sys_prompt):
         response = (
