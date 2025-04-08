@@ -129,9 +129,9 @@ def setup_logger(
     """
     # Configure formatters
     detailed_formatter = logging.Formatter(
-        "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+        '%(asctime)s - %(levelname)s [%(filename)s::%(lineno)d] - %(funcName)s() - %(message)s'
     )
-    simple_formatter = logging.Formatter("%(levelname)s: %(message)s")
+    simple_formatter = logging.Formatter('%(asctime)s - %(levelname)s [%(filename)s::%(lineno)d] - %(funcName)s() - %(message)s')
 
     logger_instance = logging.getLogger(logger_name)
     logger_instance.setLevel(level)
