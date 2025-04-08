@@ -1,6 +1,7 @@
 """
 LightRAG FastAPI Server
 """
+import signal
 
 from fastapi import FastAPI, Depends, HTTPException, status
 import asyncio
@@ -596,6 +597,9 @@ def main():
     if "GUNICORN_CMD_ARGS" in os.environ:
         # If started with Gunicorn, return directly as Gunicorn will call get_application
         print("Running under Gunicorn - worker management handled by Gunicorn")
+        # 禁用对SIGWINCH的信号处理
+        from gunicorn.glogging import Logger
+        Logger.ignore_signal = lambda self, signum: signum == signal.SIGWINCH or super().ignore_signal(signum)
         return
 
     # Check .env file
