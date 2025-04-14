@@ -1767,7 +1767,7 @@ SQL_TEMPLATES = {
         FROM LIGHTRAG_VDB_RELATION r
         JOIN relevant_chunks c ON c.chunk_id = ANY(r.chunk_ids)
         WHERE r.workspace=$1
-    ) AS subquery filtered
+    ) AS filtered_subquery
     WHERE distance>$2
     ORDER BY distance DESC
     LIMIT $3
@@ -1784,7 +1784,7 @@ SQL_TEMPLATES = {
                 FROM LIGHTRAG_VDB_ENTITY e
                 JOIN relevant_chunks c ON c.chunk_id = ANY(e.chunk_ids)
                 WHERE e.workspace=$1
-            ) AS subquery
+            ) AS filtered_subquery
         WHERE distance>$2
         ORDER BY distance DESC
         LIMIT $3
