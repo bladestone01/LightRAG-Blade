@@ -20,10 +20,13 @@ from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 from lightrag.api.utils_api import (
     get_combined_auth_dependency,
-    parse_args,
-    get_default_host,
     display_splash_screen,
     check_env_file,
+)
+from .config import (
+    global_args,
+    update_uvicorn_mode_config,
+    get_default_host,
 )
 import sys
 from lightrag import LightRAG, __version__ as core_version
@@ -52,6 +55,10 @@ from lightrag.api.auth import auth_handler
 # allows to use different .env file for each lightrag instance
 # the OS environment variables take precedence over the .env file
 load_dotenv(dotenv_path=".env", override=False)
+
+
+webui_title = os.getenv("WEBUI_TITLE")
+webui_description = os.getenv("WEBUI_DESCRIPTION")
 
 # Initialize config parser
 config = configparser.ConfigParser()
@@ -151,7 +158,6 @@ def create_app(args):
         "openapi_url": "/openapi.json",  # Explicitly set OpenAPI schema URL
         "docs_url": "/docs",  # Explicitly set docs URL
         "redoc_url": "/redoc",  # Explicitly set redoc URL
-        "openapi_tags": [{"name": "api"}],
         "lifespan": lifespan,
     }
 
@@ -165,10 +171,10 @@ def create_app(args):
     app = FastAPI(**app_kwargs)
 
     def get_cors_origins():
-        """Get allowed origins from environment variable
+        """Get allowed origins from global_args
         Returns a list of allowed origins, defaults to ["*"] if not set
         """
-        origins_str = os.getenv("CORS_ORIGINS", "*")
+        origins_str = global_args.cors_origins
         if origins_str == "*":
             return ["*"]
         return [origin.strip() for origin in origins_str.split(",")]
@@ -311,14 +317,16 @@ def create_app(args):
                 "cosine_better_than_threshold": args.cosine_threshold
             },
             enable_llm_cache_for_entity_extract=args.enable_llm_cache_for_extract,
+            enable_llm_cache=args.enable_llm_cache,
             embedding_cache_config={
                 "enabled": True,
                 "similarity_threshold": 0.95,
                 "use_llm_check": False,
             },
-            namespace_prefix=args.namespace_prefix,
+            # namespace_prefix=args.namespace_prefix,
             auto_manage_storages_states=False,
             max_parallel_insert=args.max_parallel_insert,
+            addon_params={"language": args.summary_language},
         )
     else:  # azure_openai
         rag = LightRAG(
@@ -341,14 +349,16 @@ def create_app(args):
                 "cosine_better_than_threshold": args.cosine_threshold
             },
             enable_llm_cache_for_entity_extract=args.enable_llm_cache_for_extract,
+            enable_llm_cache=args.enable_llm_cache,
             embedding_cache_config={
                 "enabled": True,
                 "similarity_threshold": 0.95,
                 "use_llm_check": False,
             },
-            namespace_prefix=args.namespace_prefix,
+            # namespace_prefix=args.namespace_prefix,
             auto_manage_storages_states=False,
             max_parallel_insert=args.max_parallel_insert,
+            addon_params={"language": args.summary_language},
         )
 
     # Add routes
@@ -382,6 +392,8 @@ def create_app(args):
                 "message": "Authentication is disabled. Using guest access.",
                 "core_version": core_version,
                 "api_version": __api_version__,
+                "webui_title": webui_title,
+                "webui_description": webui_description,
             }
 
         return {
@@ -389,6 +401,8 @@ def create_app(args):
             "auth_mode": "enabled",
             "core_version": core_version,
             "api_version": __api_version__,
+            "webui_title": webui_title,
+            "webui_description": webui_description,
         }
 
     @app.post("/login")
@@ -405,6 +419,8 @@ def create_app(args):
                 "message": "Authentication is disabled. Using guest access.",
                 "core_version": core_version,
                 "api_version": __api_version__,
+                "webui_title": webui_title,
+                "webui_description": webui_description,
             }
         username = form_data.username
         if auth_handler.accounts.get(username) != form_data.password:
@@ -422,6 +438,8 @@ def create_app(args):
             "auth_mode": "enabled",
             "core_version": core_version,
             "api_version": __api_version__,
+            "webui_title": webui_title,
+            "webui_description": webui_description,
         }
 
     @app.get("/health", dependencies=[Depends(combined_auth)])
@@ -454,11 +472,14 @@ def create_app(args):
                     "graph_storage": args.graph_storage,
                     "vector_storage": args.vector_storage,
                     "enable_llm_cache_for_extract": args.enable_llm_cache_for_extract,
+                    "enable_llm_cache": args.enable_llm_cache,
                 },
-                "core_version": core_version,
-                "api_version": __api_version__,
                 "auth_mode": auth_mode,
                 "pipeline_busy": pipeline_status.get("busy", False),
+                "core_version": core_version,
+                "api_version": __api_version__,
+                "webui_title": webui_title,
+                "webui_description": webui_description,
             }
         except Exception as e:
             logger.error(f"Error getting health status: {str(e)}")
@@ -491,7 +512,7 @@ def create_app(args):
 def get_application(args=None):
     """Factory function for creating the FastAPI application"""
     if args is None:
-        args = parse_args()
+        args = global_args
     return create_app(args)
 
 
@@ -615,30 +636,31 @@ def main():
 
     # Configure logging before parsing args
     configure_logging()
-
-    args = parse_args(is_uvicorn_mode=True)
-    display_splash_screen(args)
+    update_uvicorn_mode_config()
+    display_splash_screen(global_args)
 
     # Create application instance directly instead of using factory function
-    app = create_app(args)
+    app = create_app(global_args)
 
     # Start Uvicorn in single process mode
     uvicorn_config = {
         "app": app,  # Pass application instance directly instead of string path
-        "host": args.host,
-        "port": args.port,
+        "host": global_args.host,
+        "port": global_args.port,
         "log_config": None,  # Disable default config
     }
 
-    if args.ssl:
+    if global_args.ssl:
         uvicorn_config.update(
             {
-                "ssl_certfile": args.ssl_certfile,
-                "ssl_keyfile": args.ssl_keyfile,
+                "ssl_certfile": global_args.ssl_certfile,
+                "ssl_keyfile": global_args.ssl_keyfile,
             }
         )
 
-    print(f"Starting Uvicorn server in single-process mode on {args.host}:{args.port}")
+    print(
+        f"Starting Uvicorn server in single-process mode on {global_args.host}:{global_args.port}"
+    )
     uvicorn.run(**uvicorn_config)
 
 

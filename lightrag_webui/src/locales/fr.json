@@ -32,14 +32,25 @@
     "authDisabled": "L'authentification est désactivée. Utilisation du mode sans connexion.",
     "guestMode": "Mode sans connexion"
   },
+  "common": {
+    "cancel": "Annuler",
+    "save": "Sauvegarder"
+  },
   "documentPanel": {
     "clearDocuments": {
       "button": "Effacer",
       "tooltip": "Effacer les documents",
       "title": "Effacer les documents",
+      "description": "Cette action supprimera tous les documents du système",
+      "warning": "ATTENTION : Cette action supprimera définitivement tous les documents et ne peut pas être annulée !",
       "confirm": "Voulez-vous vraiment effacer tous les documents ?",
+      "confirmPrompt": "Tapez 'yes' pour confirmer cette action",
+      "confirmPlaceholder": "Tapez yes pour confirmer",
+      "clearCache": "Effacer le cache LLM",
       "confirmButton": "OUI",
       "success": "Documents effacés avec succès",
+      "cacheCleared": "Cache effacé avec succès",
+      "cacheClearFailed": "Échec de l'effacement du cache :\n{{error}}",
       "failed": "Échec de l'effacement des documents :\n{{message}}",
       "error": "Échec de l'effacement des documents :\n{{error}}"
     },
@@ -95,6 +106,7 @@
         "metadata": "Métadonnées"
       },
       "status": {
+        "all": "Tous",
         "completed": "Terminé",
         "processing": "En traitement",
         "pending": "En attente",
@@ -127,6 +139,27 @@
     }
   },
   "graphPanel": {
+    "dataIsTruncated": "Les données du graphe sont tronquées au nombre maximum de nœuds",
+    "statusDialog": {
+      "title": "Paramètres du Serveur LightRAG",
+      "description": "Afficher l'état actuel du système et les informations de connexion"
+    },
+    "legend": "Légende",
+    "nodeTypes": {
+      "person": "Personne",
+      "category": "Catégorie",
+      "geo": "Géographique",
+      "location": "Emplacement",
+      "organization": "Organisation",
+      "event": "Événement",
+      "equipment": "Équipement",
+      "weapon": "Arme",
+      "animal": "Animal",
+      "unknown": "Inconnu",
+      "object": "Objet",
+      "group": "Groupe",
+      "technology": "Technologie"
+    },
     "sideBar": {
       "settings": {
         "settings": "Paramètres",
@@ -139,9 +172,12 @@
         "hideUnselectedEdges": "Masquer les arêtes non sélectionnées",
         "edgeEvents": "Événements des arêtes",
         "maxQueryDepth": "Profondeur maximale de la requête",
-        "minDegree": "Degré minimum",
+        "maxNodes": "Nombre maximum de nœuds",
         "maxLayoutIterations": "Itérations maximales de mise en page",
-        "depth": "Profondeur",
+        "resetToDefault": "Réinitialiser par défaut",
+        "edgeSizeRange": "Plage de taille des arêtes",
+        "depth": "D",
+        "max": "Max",
         "degree": "Degré",
         "apiKey": "Clé API",
         "enterYourAPIkey": "Entrez votre clé API",
@@ -171,6 +207,9 @@
       "fullScreenControl": {
         "fullScreen": "Plein écran",
         "windowed": "Fenêtré"
+      },
+      "legendControl": {
+        "toggleLegend": "Basculer la légende"
       }
     },
     "statusIndicator": {
@@ -198,6 +237,17 @@
       "vectorStorage": "Stockage vectoriel"
     },
     "propertiesView": {
+      "editProperty": "Modifier {{property}}",
+      "editPropertyDescription": "Modifiez la valeur de la propriété dans la zone de texte ci-dessous.",
+      "errors": {
+        "duplicateName": "Le nom du nœud existe déjà",
+        "updateFailed": "Échec de la mise à jour du nœud",
+        "tryAgainLater": "Veuillez réessayer plus tard"
+      },
+      "success": {
+        "entityUpdated": "Nœud mis à jour avec succès",
+        "relationUpdated": "Relation mise à jour avec succès"
+      },
       "node": {
         "title": "Nœud",
         "id": "ID",
@@ -216,7 +266,9 @@
           "entity_type": "Type",
           "source_id": "ID source",
           "Neighbour": "Voisin",
-          "file_path": "Source"
+          "file_path": "Source",
+          "keywords": "Keys",
+          "weight": "Poids"
         }
       },
       "edge": {
@@ -258,13 +310,14 @@
       "parametersTitle": "Paramètres",
       "parametersDescription": "Configurez vos paramètres de requête",
       "queryMode": "Mode de requête",
-      "queryModeTooltip": "Sélectionnez la stratégie de récupération :\n• Naïf : Recherche de base sans techniques avancées\n• Local : Récupération d'informations dépendante du contexte\n• Global : Utilise une base de connaissances globale\n• Hybride : Combine récupération locale et globale\n• Mixte : Intègre le graphe de connaissances avec la récupération vectorielle",
+      "queryModeTooltip": "Sélectionnez la stratégie de récupération :\n• Naïf : Recherche de base sans techniques avancées\n• Local : Récupération d'informations dépendante du contexte\n• Global : Utilise une base de connaissances globale\n• Hybride : Combine récupération locale et globale\n• Mixte : Intègre le graphe de connaissances avec la récupération vectorielle\n• Bypass : Transmet directement la requête au LLM sans récupération",
       "queryModeOptions": {
         "naive": "Naïf",
         "local": "Local",
         "global": "Global",
         "hybrid": "Hybride",
-        "mix": "Mixte"
+        "mix": "Mixte",
+        "bypass": "Bypass"
       },
       "responseFormat": "Format de réponse",
       "responseFormatTooltip": "Définit le format de la réponse. Exemples :\n• Plusieurs paragraphes\n• Paragraphe unique\n• Points à puces",

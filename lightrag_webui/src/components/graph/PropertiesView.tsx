@@ -5,6 +5,7 @@ import Button from '@/components/ui/Button'
 import useLightragGraph from '@/hooks/useLightragGraph'
 import { useTranslation } from 'react-i18next'
 import { GitBranchPlus, Scissors } from 'lucide-react'
+import EditablePropertyRow from './EditablePropertyRow'
 
 /**
  * Component that view properties of elements in graph.
@@ -15,10 +16,12 @@ const PropertiesView = () => {
   const focusedNode = useGraphStore.use.focusedNode()
   const selectedEdge = useGraphStore.use.selectedEdge()
   const focusedEdge = useGraphStore.use.focusedEdge()
+  const graphDataVersion = useGraphStore.use.graphDataVersion()
 
   const [currentElement, setCurrentElement] = useState<NodeType | EdgeType | null>(null)
   const [currentType, setCurrentType] = useState<'node' | 'edge' | null>(null)
 
+  // This effect will run when selection changes or when graph data is updated
   useEffect(() => {
     let type: 'node' | 'edge' | null = null
     let element: RawNodeType | RawEdgeType | null = null
@@ -52,6 +55,7 @@ const PropertiesView = () => {
     selectedNode,
     focusedEdge,
     selectedEdge,
+    graphDataVersion, // Add dependency on graphDataVersion to refresh when data changes
     setCurrentElement,
     setCurrentType,
     getNode,
@@ -92,6 +96,7 @@ const refineNodeProperties = (node: RawNodeType): NodeType => {
   if (state.sigmaGraph && state.rawGraph) {
     try {
       if (!state.sigmaGraph.hasNode(node.id)) {
+        console.warn('Node not found in sigmaGraph:', node.id)
         return {
           ...node,
           relationships: []
@@ -138,7 +143,8 @@ const refineEdgeProperties = (edge: RawEdgeType): EdgeType => {
 
   if (state.sigmaGraph && state.rawGraph) {
     try {
-      if (!state.sigmaGraph.hasEdge(edge.id)) {
+      if (!state.sigmaGraph.hasEdge(edge.dynamicId)) {
+        console.warn('Edge not found in sigmaGraph:', edge.id, 'dynamicId:', edge.dynamicId)
         return {
           ...edge,
           sourceNode: undefined,
@@ -169,12 +175,28 @@ const PropertyRow = ({
   name,
   value,
   onClick,
-  tooltip
+  tooltip,
+  nodeId,
+  edgeId,
+  dynamicId,
+  entityId,
+  entityType,
+  sourceId,
+  targetId,
+  isEditable = false
 }: {
   name: string
   value: any
   onClick?: () => void
   tooltip?: string
+  nodeId?: string
+  entityId?: string
+  edgeId?: string
+  dynamicId?: string
+  entityType?: 'node' | 'edge'
+  sourceId?: string
+  targetId?: string
+  isEditable?: boolean
 }) => {
   const { t } = useTranslation()
 
@@ -184,12 +206,33 @@ const PropertyRow = ({
     return translation === translationKey ? name : translation
   }
 
+  // Use EditablePropertyRow for editable fields (description, entity_id and keywords)
+  if (isEditable && (name === 'description' || name === 'entity_id' || name === 'keywords')) {
+    return (
+      <EditablePropertyRow
+        name={name}
+        value={value}
+        onClick={onClick}
+        nodeId={nodeId}
+        entityId={entityId}
+        edgeId={edgeId}
+        dynamicId={dynamicId}
+        entityType={entityType}
+        sourceId={sourceId}
+        targetId={targetId}
+        isEditable={true}
+        tooltip={tooltip || (typeof value === 'string' ? value : JSON.stringify(value, null, 2))}
+      />
+    )
+  }
+
+  // For non-editable fields, use the regular Text component
   return (
     <div className="flex items-center gap-2">
-      <label className="text-primary/60 tracking-wide whitespace-nowrap">{getPropertyNameTranslation(name)}</label>:
+      <span className="text-primary/60 tracking-wide whitespace-nowrap">{getPropertyNameTranslation(name)}</span>:
       <Text
         className="hover:bg-primary/20 rounded p-1 overflow-hidden text-ellipsis"
-        tooltipClassName="max-w-80"
+        tooltipClassName="max-w-80 -translate-x-13"
         text={value}
         tooltip={tooltip || (typeof value === 'string' ? value : JSON.stringify(value, null, 2))}
         side="left"
@@ -213,7 +256,7 @@ const NodePropertiesView = ({ node }: { node: NodeType }) => {
   return (
     <div className="flex flex-col gap-2">
       <div className="flex justify-between items-center">
-        <label className="text-md pl-1 font-bold tracking-wide text-blue-700">{t('graphPanel.propertiesView.node.title')}</label>
+        <h3 className="text-md pl-1 font-bold tracking-wide text-blue-700">{t('graphPanel.propertiesView.node.title')}</h3>
         <div className="flex gap-3">
           <Button
             size="icon"
@@ -236,7 +279,7 @@ const NodePropertiesView = ({ node }: { node: NodeType }) => {
         </div>
       </div>
       <div className="bg-primary/5 max-h-96 overflow-auto rounded p-1">
-        <PropertyRow name={t('graphPanel.propertiesView.node.id')} value={node.id} />
+        <PropertyRow name={t('graphPanel.propertiesView.node.id')} value={String(node.id)} />
         <PropertyRow
           name={t('graphPanel.propertiesView.node.labels')}
           value={node.labels.join(', ')}
@@ -246,19 +289,29 @@ const NodePropertiesView = ({ node }: { node: NodeType }) => {
         />
         <PropertyRow name={t('graphPanel.propertiesView.node.degree')} value={node.degree} />
       </div>
-      <label className="text-md pl-1 font-bold tracking-wide text-amber-700">{t('graphPanel.propertiesView.node.properties')}</label>
+      <h3 className="text-md pl-1 font-bold tracking-wide text-amber-700">{t('graphPanel.propertiesView.node.properties')}</h3>
       <div className="bg-primary/5 max-h-96 overflow-auto rounded p-1">
         {Object.keys(node.properties)
           .sort()
           .map((name) => {
-            return <PropertyRow key={name} name={name} value={node.properties[name]} />
+            return (
+              <PropertyRow
+                key={name}
+                name={name}
+                value={node.properties[name]}
+                nodeId={String(node.id)}
+                entityId={node.properties['entity_id']}
+                entityType="node"
+                isEditable={name === 'description' || name === 'entity_id'}
+              />
+            )
           })}
       </div>
       {node.relationships.length > 0 && (
         <>
-          <label className="text-md pl-1 font-bold tracking-wide text-emerald-700">
+          <h3 className="text-md pl-1 font-bold tracking-wide text-emerald-700">
             {t('graphPanel.propertiesView.node.relationships')}
-          </label>
+          </h3>
           <div className="bg-primary/5 max-h-96 overflow-auto rounded p-1">
             {node.relationships.map(({ type, id, label }) => {
               return (
@@ -283,7 +336,7 @@ const EdgePropertiesView = ({ edge }: { edge: EdgeType }) => {
   const { t } = useTranslation()
   return (
     <div className="flex flex-col gap-2">
-      <label className="text-md pl-1 font-bold tracking-wide text-violet-700">{t('graphPanel.propertiesView.edge.title')}</label>
+      <h3 className="text-md pl-1 font-bold tracking-wide text-violet-700">{t('graphPanel.propertiesView.edge.title')}</h3>
       <div className="bg-primary/5 max-h-96 overflow-auto rounded p-1">
         <PropertyRow name={t('graphPanel.propertiesView.edge.id')} value={edge.id} />
         {edge.type && <PropertyRow name={t('graphPanel.propertiesView.edge.type')} value={edge.type} />}
@@ -302,12 +355,24 @@ const EdgePropertiesView = ({ edge }: { edge: EdgeType }) => {
           }}
         />
       </div>
-      <label className="text-md pl-1 font-bold tracking-wide text-amber-700">{t('graphPanel.propertiesView.edge.properties')}</label>
+      <h3 className="text-md pl-1 font-bold tracking-wide text-amber-700">{t('graphPanel.propertiesView.edge.properties')}</h3>
       <div className="bg-primary/5 max-h-96 overflow-auto rounded p-1">
         {Object.keys(edge.properties)
           .sort()
           .map((name) => {
-            return <PropertyRow key={name} name={name} value={edge.properties[name]} />
+            return (
+              <PropertyRow
+                key={name}
+                name={name}
+                value={edge.properties[name]}
+                edgeId={String(edge.id)}
+                dynamicId={String(edge.dynamicId)}
+                entityType="edge"
+                sourceId={edge.sourceNode?.properties['entity_id'] || edge.source}
+                targetId={edge.targetNode?.properties['entity_id'] || edge.target}
+                isEditable={name === 'description' || name === 'keywords'}
+              />
+            )
           })}
       </div>
     </div>

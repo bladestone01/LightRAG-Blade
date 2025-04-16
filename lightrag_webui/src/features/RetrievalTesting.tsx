@@ -60,6 +60,7 @@ export default function RetrievalTesting() {
           }
           return newMessages
         })
+        scrollToBottom()
       }
 
       // Prepare query parameters
@@ -69,6 +70,7 @@ export default function RetrievalTesting() {
         query: userMessage.content,
         conversation_history: prevMessages
           .filter((m) => m.isError !== true)
+          .slice(-(state.querySettings.history_turns || 0) * 2)
           .map((m) => ({ role: m.role, content: m.content }))
       }
 
@@ -147,13 +149,19 @@ export default function RetrievalTesting() {
             <EraserIcon />
             {t('retrievePanel.retrieval.clear')}
           </Button>
-          <Input
-            className="flex-1"
-            value={inputValue}
-            onChange={(e) => setInputValue(e.target.value)}
-            placeholder={t('retrievePanel.retrieval.placeholder')}
-            disabled={isLoading}
-          />
+          <div className="flex-1 relative">
+            <label htmlFor="query-input" className="sr-only">
+              {t('retrievePanel.retrieval.placeholder')}
+            </label>
+            <Input
+              id="query-input"
+              className="w-full"
+              value={inputValue}
+              onChange={(e) => setInputValue(e.target.value)}
+              placeholder={t('retrievePanel.retrieval.placeholder')}
+              disabled={isLoading}
+            />
+          </div>
           <Button type="submit" variant="default" disabled={isLoading} size="sm">
             <SendIcon />
             {t('retrievePanel.retrieval.send')}

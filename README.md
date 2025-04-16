@@ -1,4 +1,5 @@
 <center><h2>🚀 LightRAG: Simple and Fast Retrieval-Augmented Generation</h2></center>
+
 <div align="center">
 <table border="0" width="100%">
 <tr>
@@ -6,6 +7,7 @@
 <img src="./assets/logo.png" width="80" height="80" alt="lightrag">
 </td>
 <td>
+
 <div>
     <p>
         <a href='https://lightrag.github.io'><img src='https://img.shields.io/badge/Project-Page-Green'></a>
@@ -32,16 +34,19 @@
 
 </div>
 
+<div align="center">
+    <a href="https://trendshift.io/repositories/13043" target="_blank"><img src="https://trendshift.io/api/badge/repositories/13043" alt="HKUDS%2FLightRAG | Trendshift" style="width: 250px; height: 55px;" width="250" height="55"/></a>
+</div>
+
 ## 🎉 News
 
-- [X] [2025.03.18]🎯📢LightRAG now supports citation functionality.
+- [X] [2025.03.18]🎯📢LightRAG now supports citation functionality, enabling proper source attribution.
 - [X] [2025.02.05]🎯📢Our team has released [VideoRAG](https://github.com/HKUDS/VideoRAG) understanding extremely long-context videos.
 - [X] [2025.01.13]🎯📢Our team has released [MiniRAG](https://github.com/HKUDS/MiniRAG) making RAG simpler with small models.
 - [X] [2025.01.06]🎯📢You can now [use PostgreSQL for Storage](#using-postgresql-for-storage).
 - [X] [2024.12.31]🎯📢LightRAG now supports [deletion by document ID](https://github.com/HKUDS/LightRAG?tab=readme-ov-file#delete).
 - [X] [2024.11.25]🎯📢LightRAG now supports seamless integration of [custom knowledge graphs](https://github.com/HKUDS/LightRAG?tab=readme-ov-file#insert-custom-kg), empowering users to enhance the system with their own domain expertise.
 - [X] [2024.11.19]🎯📢A comprehensive guide to LightRAG is now available on [LearnOpenCV](https://learnopencv.com/lightrag). Many thanks to the blog author.
-- [X] [2024.11.12]🎯📢LightRAG now supports [Oracle Database 23ai for all storage types (KV, vector, and graph)](https://github.com/HKUDS/LightRAG/blob/main/examples/lightrag_oracle_demo.py).
 - [X] [2024.11.11]🎯📢LightRAG now supports [deleting entities by their names](https://github.com/HKUDS/LightRAG?tab=readme-ov-file#delete).
 - [X] [2024.11.09]🎯📢Introducing the [LightRAG Gui](https://lightrag-gui.streamlit.app), which allows you to insert, query, visualize, and download LightRAG knowledge.
 - [X] [2024.11.04]🎯📢You can now [use Neo4J for Storage](https://github.com/HKUDS/LightRAG?tab=readme-ov-file#using-neo4j-for-storage).
@@ -443,6 +448,55 @@ if __name__ == "__main__":
 
 </details>
 
+### Token Usage Tracking
+
+<details>
+<summary> <b>Overview and Usage</b> </summary>
+
+LightRAG provides a TokenTracker tool to monitor and manage token consumption by large language models. This feature is particularly useful for controlling API costs and optimizing performance.
+
+#### Usage
+
+```python
+from lightrag.utils import TokenTracker
+
+# Create TokenTracker instance
+token_tracker = TokenTracker()
+
+# Method 1: Using context manager (Recommended)
+# Suitable for scenarios requiring automatic token usage tracking
+with token_tracker:
+    result1 = await llm_model_func("your question 1")
+    result2 = await llm_model_func("your question 2")
+
+# Method 2: Manually adding token usage records
+# Suitable for scenarios requiring more granular control over token statistics
+token_tracker.reset()
+
+rag.insert()
+
+rag.query("your question 1", param=QueryParam(mode="naive"))
+rag.query("your question 2", param=QueryParam(mode="mix"))
+
+# Display total token usage (including insert and query operations)
+print("Token usage:", token_tracker.get_usage())
+```
+
+#### Usage Tips
+- Use context managers for long sessions or batch operations to automatically track all token consumption
+- For scenarios requiring segmented statistics, use manual mode and call reset() when appropriate
+- Regular checking of token usage helps detect abnormal consumption early
+- Actively use this feature during development and testing to optimize production costs
+
+#### Practical Examples
+You can refer to these examples for implementing token tracking:
+- `examples/lightrag_gemini_track_token_demo.py`: Token tracking example using Google Gemini model
+- `examples/lightrag_siliconcloud_track_token_demo.py`: Token tracking example using SiliconCloud model
+
+These examples demonstrate how to effectively use the TokenTracker feature with different models and scenarios.
+
+</details>
+
 ### Conversation History Support
 
 
@@ -607,7 +661,7 @@ The `apipeline_enqueue_documents` and `apipeline_process_enqueue_documents` func
 
 This is useful for scenarios where you want to process documents in the background while still allowing the main thread to continue executing.
 
-And using a routine to process news documents.
+And using a routine to process new documents.
 
 ```python
 rag = LightRAG(..)
@@ -1096,9 +1150,10 @@ Valid modes are:
 | **Parameter** | **Type** | **Explanation** | **Default** |
 |--------------|----------|-----------------|-------------|
 | **working_dir** | `str` | Directory where the cache will be stored | `lightrag_cache+timestamp` |
-| **kv_storage** | `str` | Storage type for documents and text chunks. Supported types: `JsonKVStorage`, `OracleKVStorage` | `JsonKVStorage` |
-| **vector_storage** | `str` | Storage type for embedding vectors. Supported types: `NanoVectorDBStorage`, `OracleVectorDBStorage` | `NanoVectorDBStorage` |
-| **graph_storage** | `str` | Storage type for graph edges and nodes. Supported types: `NetworkXStorage`, `Neo4JStorage`, `OracleGraphStorage` | `NetworkXStorage` |
+| **kv_storage** | `str` | Storage type for documents and text chunks. Supported types: `JsonKVStorage`,`PGKVStorage`,`RedisKVStorage`,`MongoKVStorage` | `JsonKVStorage` |
+| **vector_storage** | `str` | Storage type for embedding vectors. Supported types: `NanoVectorDBStorage`,`PGVectorStorage`,`MilvusVectorDBStorage`,`ChromaVectorDBStorage`,`FaissVectorDBStorage`,`MongoVectorDBStorage`,`QdrantVectorDBStorage` | `NanoVectorDBStorage` |
+| **graph_storage** | `str` | Storage type for graph edges and nodes. Supported types: `NetworkXStorage`,`Neo4JStorage`,`PGGraphStorage`,`AGEStorage` | `NetworkXStorage` |
+| **doc_status_storage** | `str` | Storage type for documents process status. Supported types: `JsonDocStatusStorage`,`PGDocStatusStorage`,`MongoDocStatusStorage` | `JsonDocStatusStorage` |
 | **chunk_token_size** | `int` | Maximum token size per chunk when splitting documents | `1200` |
 | **chunk_overlap_token_size** | `int` | Overlap token size between two chunks when splitting documents | `100` |
 | **tiktoken_model_name** | `str` | Model name for the Tiktoken encoder used to calculate token numbers | `gpt-4o-mini` |

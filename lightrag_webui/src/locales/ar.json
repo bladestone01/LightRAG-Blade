@@ -32,14 +32,25 @@
     "authDisabled": "تم تعطيل المصادقة. استخدام وضع بدون تسجيل دخول.",
     "guestMode": "وضع بدون تسجيل دخول"
   },
+  "common": {
+    "cancel": "إلغاء",
+    "save": "حفظ"
+  },
   "documentPanel": {
     "clearDocuments": {
       "button": "مسح",
       "tooltip": "مسح المستندات",
       "title": "مسح المستندات",
+      "description": "سيؤدي هذا إلى إزالة جميع المستندات من النظام",
+      "warning": "تحذير: سيؤدي هذا الإجراء إلى حذف جميع المستندات بشكل دائم ولا يمكن التراجع عنه!",
       "confirm": "هل تريد حقًا مسح جميع المستندات؟",
+      "confirmPrompt": "اكتب 'yes' لتأكيد هذا الإجراء",
+      "confirmPlaceholder": "اكتب yes للتأكيد",
+      "clearCache": "مسح كاش نموذج اللغة",
       "confirmButton": "نعم",
       "success": "تم مسح المستندات بنجاح",
+      "cacheCleared": "تم مسح ذاكرة التخزين المؤقت بنجاح",
+      "cacheClearFailed": "فشل مسح ذاكرة التخزين المؤقت:\n{{error}}",
       "failed": "فشل مسح المستندات:\n{{message}}",
       "error": "فشل مسح المستندات:\n{{error}}"
     },
@@ -95,6 +106,7 @@
         "metadata": "البيانات الوصفية"
       },
       "status": {
+        "all": "الكل",
         "completed": "مكتمل",
         "processing": "قيد المعالجة",
         "pending": "معلق",
@@ -127,6 +139,27 @@
     }
   },
   "graphPanel": {
+    "dataIsTruncated": "تم اقتصار بيانات الرسم البياني على الحد الأقصى للعقد",
+    "statusDialog": {
+      "title": "إعدادات خادم LightRAG",
+      "description": "عرض حالة النظام الحالية ومعلومات الاتصال"
+    },
+    "legend": "المفتاح",
+    "nodeTypes": {
+      "person": "شخص",
+      "category": "فئة",
+      "geo": "كيان جغرافي",
+      "location": "موقع",
+      "organization": "منظمة",
+      "event": "حدث",
+      "equipment": "معدات",
+      "weapon": "سلاح",
+      "animal": "حيوان",
+      "unknown": "غير معروف",
+      "object": "مصنوع",
+      "group": "مجموعة",
+      "technology": "العلوم"
+    },
     "sideBar": {
       "settings": {
         "settings": "الإعدادات",
@@ -139,9 +172,12 @@
         "hideUnselectedEdges": "إخفاء الحواف غير المحددة",
         "edgeEvents": "أحداث الحافة",
         "maxQueryDepth": "أقصى عمق للاستعلام",
-        "minDegree": "الدرجة الدنيا",
+        "maxNodes": "الحد الأقصى للعقد",
         "maxLayoutIterations": "أقصى تكرارات التخطيط",
-        "depth": "العمق",
+        "resetToDefault": "إعادة التعيين إلى الافتراضي",
+        "edgeSizeRange": "نطاق حجم الحافة",
+        "depth": "D",
+        "max": "Max",
         "degree": "الدرجة",
         "apiKey": "مفتاح واجهة برمجة التطبيقات",
         "enterYourAPIkey": "أدخل مفتاح واجهة برمجة التطبيقات الخاص بك",
@@ -171,6 +207,9 @@
       "fullScreenControl": {
         "fullScreen": "شاشة كاملة",
         "windowed": "نوافذ"
+      },
+      "legendControl": {
+        "toggleLegend": "تبديل المفتاح"
       }
     },
     "statusIndicator": {
@@ -198,6 +237,17 @@
       "vectorStorage": "تخزين المتجهات"
     },
     "propertiesView": {
+      "editProperty": "تعديل {{property}}",
+      "editPropertyDescription": "قم بتحرير قيمة الخاصية في منطقة النص أدناه.",
+      "errors": {
+        "duplicateName": "اسم العقدة موجود بالفعل",
+        "updateFailed": "فشل تحديث العقدة",
+        "tryAgainLater": "يرجى المحاولة مرة أخرى لاحقًا"
+      },
+      "success": {
+        "entityUpdated": "تم تحديث العقدة بنجاح",
+        "relationUpdated": "تم تحديث العلاقة بنجاح"
+      },
       "node": {
         "title": "عقدة",
         "id": "المعرف",
@@ -216,7 +266,9 @@
           "entity_type": "النوع",
           "source_id": "معرف المصدر",
           "Neighbour": "الجار",
-          "file_path": "المصدر"
+          "file_path": "المصدر",
+          "keywords": "الكلمات الرئيسية",
+          "weight": "الوزن"
         }
       },
       "edge": {
@@ -258,13 +310,14 @@
       "parametersTitle": "المعلمات",
       "parametersDescription": "تكوين معلمات الاستعلام الخاص بك",
       "queryMode": "وضع الاستعلام",
-      "queryModeTooltip": "حدد استراتيجية الاسترجاع:\n• ساذج: بحث أساسي بدون تقنيات متقدمة\n• محلي: استرجاع معلومات يعتمد على السياق\n• عالمي: يستخدم قاعدة المعرفة العالمية\n• مختلط: يجمع بين الاسترجاع المحلي والعالمي\n• مزيج: يدمج شبكة المعرفة مع الاسترجاع المتجهي",
+      "queryModeTooltip": "حدد استراتيجية الاسترجاع:\n• ساذج: بحث أساسي بدون تقنيات متقدمة\n• محلي: استرجاع معلومات يعتمد على السياق\n• عالمي: يستخدم قاعدة المعرفة العالمية\n• مختلط: يجمع بين الاسترجاع المحلي والعالمي\n• مزيج: يدمج شبكة المعرفة مع الاسترجاع المتجهي\n• تجاوز: يمرر الاستعلام مباشرة إلى LLM بدون استرجاع",
       "queryModeOptions": {
         "naive": "ساذج",
         "local": "محلي",
         "global": "عالمي",
         "hybrid": "مختلط",
-        "mix": "مزيج"
+        "mix": "مزيج",
+        "bypass": "تجاوز"
       },
       "responseFormat": "تنسيق الرد",
       "responseFormatTooltip": "يحدد تنسيق الرد. أمثلة:\n• فقرات متعددة\n• فقرة واحدة\n• نقاط نقطية",

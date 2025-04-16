@@ -1,7 +1,7 @@
-import Graph, { DirectedGraph } from 'graphology'
+import Graph, { UndirectedGraph } from 'graphology'
 import { useCallback, useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
-import { randomColor, errorMessage } from '@/lib/utils'
+import { errorMessage } from '@/lib/utils'
 import * as Constants from '@/lib/constants'
 import { useGraphStore, RawGraph, RawNodeType, RawEdgeType } from '@/stores/graph'
 import { toast } from 'sonner'
@@ -10,6 +10,152 @@ import { useBackendState } from '@/stores/state'
 import { useSettingsStore } from '@/stores/settings'
 
 import seedrandom from 'seedrandom'
+
+const TYPE_SYNONYMS: Record<string, string> = {
+  'unknown': 'unknown',
+  '未知': 'unknown',
+  'other': 'unknown',
+
+  'category': 'category',
+  '类别': 'category',
+  'type': 'category',
+  '分类': 'category',
+
+  'organization': 'organization',
+  '组织': 'organization',
+  'org': 'organization',
+  'company': 'organization',
+  '公司': 'organization',
+  '机构': 'organization',
+
+  'event': 'event',
+  '事件': 'event',
+  'activity': 'event',
+  '活动': 'event',
+
+  'person': 'person',
+  '人物': 'person',
+  'people': 'person',
+  'human': 'person',
+  '人': 'person',
+
+  'animal': 'animal',
+  '动物': 'animal',
+  'creature': 'animal',
+  '生物': 'animal',
+
+  'geo': 'geo',
+  '地理': 'geo',
+  'geography': 'geo',
+  '地域': 'geo',
+
+  'location': 'location',
+  '地点': 'location',
+  'place': 'location',
+  'address': 'location',
+  '位置': 'location',
+  '地址': 'location',
+
+  'technology': 'technology',
+  '技术': 'technology',
+  'tech': 'technology',
+  '科技': 'technology',
+
+  'equipment': 'equipment',
+  '设备': 'equipment',
+  'device': 'equipment',
+  '装备': 'equipment',
+
+  'weapon': 'weapon',
+  '武器': 'weapon',
+  'arms': 'weapon',
+  '军火': 'weapon',
+
+  'object': 'object',
+  '物品': 'object',
+  'stuff': 'object',
+  '物体': 'object',
+
+  'group': 'group',
+  '群组': 'group',
+  'community': 'group',
+  '社区': 'group'
+};
+
+// 节点类型到颜色的映射
+const NODE_TYPE_COLORS: Record<string, string> = {
+  'unknown': '#f4d371', // Yellow
+  'category': '#e3493b', // GoogleRed
+  'organization': '#0f705d', // Green
+  'event': '#00bfa0', // Turquoise
+  'person': '#4169E1', // RoyalBlue
+  'animal': '#84a3e1', // SkyBlue
+  'geo': '#ff99cc', // Pale Pink
+  'location': '#cf6d17', // Carrot
+  'technology': '#b300b3', // Purple
+  'equipment': '#2F4F4F', // DarkSlateGray
+  'weapon': '#4421af', // DeepPurple
+  'object': '#00cc00', // Green
+  'group': '#0f558a', // NavyBlue
+};
+
+// Extended colors pool - Used for unknown node types
+const EXTENDED_COLORS = [
+  '#5a2c6d', // DeepViolet
+  '#0000ff', // Blue
+  '#cd071e', // ChinaRed
+  '#00CED1', // DarkTurquoise
+  '#9b3a31', // DarkBrown
+  '#b2e061', // YellowGreen
+  '#bd7ebe', // LightViolet
+  '#6ef7b3', // LightGreen
+  '#003366', // DarkBlue
+  '#DEB887', // BurlyWood
+];
+
+// Select color based on node type
+const getNodeColorByType = (nodeType: string | undefined): string => {
+
+  const defaultColor = '#5D6D7E';
+
+  const normalizedType = nodeType ? nodeType.toLowerCase() : 'unknown';
+  const typeColorMap = useGraphStore.getState().typeColorMap;
+
+  // Return previous color if already mapped
+  if (typeColorMap.has(normalizedType)) {
+    return typeColorMap.get(normalizedType) || defaultColor;
+  }
+
+  const standardType = TYPE_SYNONYMS[normalizedType];
+  if (standardType) {
+    const color = NODE_TYPE_COLORS[standardType];
+    // Update color mapping
+    const newMap = new Map(typeColorMap);
+    newMap.set(normalizedType, color);
+    useGraphStore.setState({ typeColorMap: newMap });
+    return color;
+  }
+
+  // For unpredefind nodeTypes, use extended colors
+  // Find used extended colors
+  const usedExtendedColors = new Set(
+    Array.from(typeColorMap.entries())
+      .filter(([, color]) => !Object.values(NODE_TYPE_COLORS).includes(color))
+      .map(([, color]) => color)
+  );
+
+  // Find and use the first unused extended color
+  const unusedColor = EXTENDED_COLORS.find(color => !usedExtendedColors.has(color));
+  const newColor = unusedColor || defaultColor;
+
+  // Update color mapping
+  const newMap = new Map(typeColorMap);
+  newMap.set(normalizedType, newColor);
+  useGraphStore.setState({ typeColorMap: newMap });
+
+  return newColor;
+};
+
 
 const validateGraph = (graph: RawGraph) => {
   // Check if graph exists
@@ -68,9 +214,15 @@ export type NodeType = {
   color: string
   highlighted?: boolean
 }
-export type EdgeType = { label: string }
+export type EdgeType = {
+  label: string
+  originalWeight?: number
+  size?: number
+  color?: string
+  hidden?: boolean
+}
 
-const fetchGraph = async (label: string, maxDepth: number, minDegree: number) => {
+const fetchGraph = async (label: string, maxDepth: number, maxNodes: number) => {
   let rawData: any = null;
 
   // Check if we need to fetch all database labels first
@@ -85,12 +237,16 @@ const fetchGraph = async (label: string, maxDepth: number, minDegree: number) =>
     }
   }
 
+  // Trigger GraphLabels component to check if the label is valid
+  // console.log('Setting labelsFetchAttempted to true');
+  useGraphStore.getState().setLabelsFetchAttempted(true)
+
   // If label is empty, use default label '*'
   const queryLabel = label || '*';
 
   try {
-    console.log(`Fetching graph label: ${queryLabel}, depth: ${maxDepth}, deg: ${minDegree}`);
-    rawData = await queryGraphs(queryLabel, maxDepth, minDegree);
+    console.log(`Fetching graph label: ${queryLabel}, depth: ${maxDepth}, nodes: ${maxNodes}`);
+    rawData = await queryGraphs(queryLabel, maxDepth, maxNodes);
   } catch (e) {
     useBackendState.getState().setErrorMessage(errorMessage(e), 'Query Graphs Error!');
     return null;
@@ -106,9 +262,6 @@ const fetchGraph = async (label: string, maxDepth: number, minDegree: number) =>
       const node = rawData.nodes[i]
       nodeIdMap[node.id] = i
 
-      // const seed = node.labels.length > 0 ? node.labels[0] : node.id
-      seedrandom(node.id, { global: true })
-      node.color = randomColor()
       node.x = Math.random()
       node.y = Math.random()
       node.degree = 0
@@ -169,11 +322,14 @@ const fetchGraph = async (label: string, maxDepth: number, minDegree: number) =>
   }
 
   // console.debug({ data: JSON.parse(JSON.stringify(rawData)) })
-  return rawGraph
+  return { rawGraph, is_truncated: rawData.is_truncated }
 }
 
 // Create a new graph instance with the raw graph data
 const createSigmaGraph = (rawGraph: RawGraph | null) => {
+  // Get edge size settings from store
+  const minEdgeSize = useSettingsStore.getState().minEdgeSize
+  const maxEdgeSize = useSettingsStore.getState().maxEdgeSize
   // Skip graph creation if no data or empty nodes
   if (!rawGraph || !rawGraph.nodes.length) {
     console.log('No graph data available, skipping sigma graph creation');
@@ -181,7 +337,7 @@ const createSigmaGraph = (rawGraph: RawGraph | null) => {
   }
 
   // Create new graph instance
-  const graph = new DirectedGraph()
+  const graph = new UndirectedGraph()
 
   // Add nodes from raw graph data
   for (const rawNode of rawGraph?.nodes ?? []) {
@@ -204,8 +360,41 @@ const createSigmaGraph = (rawGraph: RawGraph | null) => {
 
   // Add edges from raw graph data
   for (const rawEdge of rawGraph?.edges ?? []) {
-    rawEdge.dynamicId = graph.addDirectedEdge(rawEdge.source, rawEdge.target, {
-      label: rawEdge.properties?.keywords || undefined
+    // Get weight from edge properties or default to 1
+    const weight = rawEdge.properties?.weight !== undefined ? Number(rawEdge.properties.weight) : 1
+
+    rawEdge.dynamicId = graph.addEdge(rawEdge.source, rawEdge.target, {
+      label: rawEdge.properties?.keywords || undefined,
+      size: weight, // Set initial size based on weight
+      originalWeight: weight, // Store original weight for recalculation
+      type: 'curvedNoArrow' // Explicitly set edge type to no arrow
+    })
+  }
+
+  // Calculate edge size based on weight range, similar to node size calculation
+  let minWeight = Number.MAX_SAFE_INTEGER
+  let maxWeight = 0
+
+  // Find min and max weight values
+  graph.forEachEdge(edge => {
+    const weight = graph.getEdgeAttribute(edge, 'originalWeight') || 1
+    minWeight = Math.min(minWeight, weight)
+    maxWeight = Math.max(maxWeight, weight)
+  })
+
+  // Scale edge sizes based on weight range
+  const weightRange = maxWeight - minWeight
+  if (weightRange > 0) {
+    const sizeScale = maxEdgeSize - minEdgeSize
+    graph.forEachEdge(edge => {
+      const weight = graph.getEdgeAttribute(edge, 'originalWeight') || 1
+      const scaledSize = minEdgeSize + sizeScale * Math.pow((weight - minWeight) / weightRange, 0.5)
+      graph.setEdgeAttribute(edge, 'size', scaledSize)
+    })
+  } else {
+    // If all weights are the same, use default size
+    graph.forEachEdge(edge => {
+      graph.setEdgeAttribute(edge, 'size', minEdgeSize)
     })
   }
 
@@ -218,10 +407,11 @@ const useLightrangeGraph = () => {
   const rawGraph = useGraphStore.use.rawGraph()
   const sigmaGraph = useGraphStore.use.sigmaGraph()
   const maxQueryDepth = useSettingsStore.use.graphQueryMaxDepth()
-  const minDegree = useSettingsStore.use.graphMinDegree()
+  const maxNodes = useSettingsStore.use.graphMaxNodes()
   const isFetching = useGraphStore.use.isFetching()
   const nodeToExpand = useGraphStore.use.nodeToExpand()
   const nodeToPrune = useGraphStore.use.nodeToPrune()
+
 
   // Use ref to track if data has been loaded and initial load
   const dataLoadedRef = useRef(false)
@@ -258,7 +448,7 @@ const useLightrangeGraph = () => {
     }
   }, [queryLabel, rawGraph, sigmaGraph])
 
-  // Data fetching logic
+  // Graph data fetching logic
   useEffect(() => {
     // Skip if fetch is already in progress
     if (fetchInProgressRef.current) {
@@ -271,6 +461,7 @@ const useLightrangeGraph = () => {
     }
 
     // Only fetch data when graphDataFetchAttempted is false (avoids re-fetching on vite dev mode)
+    // GraphDataFetchAttempted must set to false when queryLabel is changed
     if (!isFetching && !useGraphStore.getState().graphDataFetchAttempted) {
       // Set flags
       fetchInProgressRef.current = true
@@ -292,23 +483,37 @@ const useLightrangeGraph = () => {
       // Use a local copy of the parameters
       const currentQueryLabel = queryLabel
       const currentMaxQueryDepth = maxQueryDepth
-      const currentMinDegree = minDegree
+      const currentMaxNodes = maxNodes
 
       // Declare a variable to store data promise
-      let dataPromise;
+      let dataPromise: Promise<{ rawGraph: RawGraph | null; is_truncated: boolean | undefined } | null>;
 
       // 1. If query label is not empty, use fetchGraph
       if (currentQueryLabel) {
-        dataPromise = fetchGraph(currentQueryLabel, currentMaxQueryDepth, currentMinDegree);
+        dataPromise = fetchGraph(currentQueryLabel, currentMaxQueryDepth, currentMaxNodes);
       } else {
         // 2. If query label is empty, set data to null
         console.log('Query label is empty, show empty graph')
-        dataPromise = Promise.resolve(null);
+        dataPromise = Promise.resolve({ rawGraph: null, is_truncated: false });
       }
 
       // 3. Process data
-      dataPromise.then((data) => {
+      dataPromise.then((result) => {
         const state = useGraphStore.getState()
+        const data = result?.rawGraph;
+
+        // Assign colors based on entity_type *after* fetching
+        if (data && data.nodes) {
+          data.nodes.forEach(node => {
+            // Use entity_type instead of type
+            const nodeEntityType = node.properties?.entity_type as string | undefined;
+            node.color = getNodeColorByType(nodeEntityType);
+          });
+        }
+
+        if (result?.is_truncated) {
+          toast.info(t('graphPanel.dataIsTruncated', 'Graph data is truncated to Max Nodes'));
+        }
 
         // Reset state
         state.reset()
@@ -316,12 +521,12 @@ const useLightrangeGraph = () => {
         // Check if data is empty or invalid
         if (!data || !data.nodes || data.nodes.length === 0) {
           // Create a graph with a single "Graph Is Empty" node
-          const emptyGraph = new DirectedGraph();
+          const emptyGraph = new UndirectedGraph();
 
           // Add a single node with "Graph Is Empty" label
           emptyGraph.addNode('empty-graph-node', {
             label: t('graphPanel.emptyGraph'),
-            color: '#cccccc', // gray color
+            color: '#5D6D7E', // gray color
             x: 0.5,
             y: 0.5,
             size: 15,
@@ -336,15 +541,23 @@ const useLightrangeGraph = () => {
           // Still mark graph as empty for other logic
           state.setGraphIsEmpty(true);
 
-          // Only clear current label if it's not already empty
-          if (currentQueryLabel) {
+          // Check if the empty graph is due to 401 authentication error
+          const errorMessage = useBackendState.getState().message;
+          const isAuthError = errorMessage && errorMessage.includes('Authentication required');
+
+          // Only clear queryLabel if it's not an auth error and current label is not empty
+          if (!isAuthError && currentQueryLabel) {
             useSettingsStore.getState().setQueryLabel('');
           }
 
-          // Clear last successful query label to ensure labels are fetched next time
-          state.setLastSuccessfulQueryLabel('');
+          // Only clear last successful query label if it's not an auth error
+          if (!isAuthError) {
+            state.setLastSuccessfulQueryLabel('');
+          } else {
+            console.log('Keep queryLabel for post-login reload');
+          }
 
-          console.log('Graph data is empty, created graph with empty graph node');
+          console.log(`Graph data is empty, created graph with empty graph node. Auth error: ${isAuthError}`);
         } else {
           // Create and set new graph
           const newSigmaGraph = createSigmaGraph(data);
@@ -384,7 +597,7 @@ const useLightrangeGraph = () => {
         state.setLastSuccessfulQueryLabel('') // Clear last successful query label on error
       })
     }
-  }, [queryLabel, maxQueryDepth, minDegree, isFetching, t])
+  }, [queryLabel, maxQueryDepth, maxNodes, isFetching, t])
 
   // Handle node expansion
   useEffect(() => {
@@ -407,7 +620,7 @@ const useLightrangeGraph = () => {
         }
 
         // Fetch the extended subgraph with depth 2
-        const extendedGraph = await queryGraphs(label, 2, 0);
+        const extendedGraph = await queryGraphs(label, 2, 1000);
 
         if (!extendedGraph || !extendedGraph.nodes || !extendedGraph.edges) {
           console.error('Failed to fetch extended graph');
@@ -419,7 +632,8 @@ const useLightrangeGraph = () => {
         for (const node of extendedGraph.nodes) {
           // Generate random color values
           seedrandom(node.id, { global: true });
-          const color = randomColor();
+          const nodeEntityType = node.properties?.entity_type as string | undefined;
+          const color = getNodeColorByType(nodeEntityType);
 
           // Create a properly typed RawNodeType
           processedNodes.push({
@@ -467,9 +681,22 @@ const useLightrangeGraph = () => {
         // Get degree maxDegree from existing graph for size calculations
         const minDegree = 1;
         let maxDegree = 0;
+
+        // Initialize edge weight min and max values
+        let minWeight = Number.MAX_SAFE_INTEGER;
+        let maxWeight = 0;
+
+        // Calculate node degrees and edge weights from existing graph
         sigmaGraph.forEachNode(node => {
           const degree = sigmaGraph.degree(node);
           maxDegree = Math.max(maxDegree, degree);
+        });
+
+        // Calculate edge weights from existing graph
+        sigmaGraph.forEachEdge(edge => {
+          const weight = sigmaGraph.getEdgeAttribute(edge, 'originalWeight') || 1;
+          minWeight = Math.min(minWeight, weight);
+          maxWeight = Math.max(maxWeight, weight);
         });
 
         // First identify connectable nodes (nodes connected to the expanded node)
@@ -534,7 +761,7 @@ const useLightrangeGraph = () => {
 
         // Helper function to update node sizes
         const updateNodeSizes = (
-          sigmaGraph: DirectedGraph,
+          sigmaGraph: UndirectedGraph,
           nodesWithDiscardedEdges: Set<string>,
           minDegree: number,
           maxDegree: number
@@ -543,6 +770,7 @@ const useLightrangeGraph = () => {
           const range = maxDegree - minDegree || 1; // Avoid division by zero
           const scale = Constants.maxNodeSize - Constants.minNodeSize;
 
+          // Update node sizes
           for (const nodeId of nodesWithDiscardedEdges) {
             if (sigmaGraph.hasNode(nodeId)) {
               let newDegree = sigmaGraph.degree(nodeId);
@@ -561,6 +789,25 @@ const useLightrangeGraph = () => {
               }
             }
           }
+        };
+
+        // Helper function to update edge sizes
+        const updateEdgeSizes = (
+          sigmaGraph: UndirectedGraph,
+          minWeight: number,
+          maxWeight: number
+        ) => {
+          // Update edge sizes
+          const minEdgeSize = useSettingsStore.getState().minEdgeSize;
+          const maxEdgeSize = useSettingsStore.getState().maxEdgeSize;
+          const weightRange = maxWeight - minWeight || 1; // Avoid division by zero
+          const sizeScale = maxEdgeSize - minEdgeSize;
+
+          sigmaGraph.forEachEdge(edge => {
+            const weight = sigmaGraph.getEdgeAttribute(edge, 'originalWeight') || 1;
+            const scaledSize = minEdgeSize + sizeScale * Math.pow((weight - minWeight) / weightRange, 0.5);
+            sigmaGraph.setEdgeAttribute(edge, 'size', scaledSize);
+          });
         };
 
         // If no new connectable nodes found, show toast and return
@@ -654,13 +901,20 @@ const useLightrangeGraph = () => {
           if (sigmaGraph.hasEdge(newEdge.source, newEdge.target)) {
             continue;
           }
-          if (sigmaGraph.hasEdge(newEdge.target, newEdge.source)) {
-            continue;
-          }
+
+          // Get weight from edge properties or default to 1
+          const weight = newEdge.properties?.weight !== undefined ? Number(newEdge.properties.weight) : 1;
+
+          // Update min and max weight values
+          minWeight = Math.min(minWeight, weight);
+          maxWeight = Math.max(maxWeight, weight);
 
           // Add the edge to the sigma graph
-          newEdge.dynamicId = sigmaGraph.addDirectedEdge(newEdge.source, newEdge.target, {
-            label: newEdge.properties?.keywords || undefined
+          newEdge.dynamicId = sigmaGraph.addEdge(newEdge.source, newEdge.target, {
+            label: newEdge.properties?.keywords || undefined,
+            size: weight, // Set initial size based on weight
+            originalWeight: weight, // Store original weight for recalculation
+            type: 'curvedNoArrow' // Explicitly set edge type to no arrow
           });
 
           // Add the edge to the raw graph
@@ -682,9 +936,11 @@ const useLightrangeGraph = () => {
         // Reset search engine to force rebuild
         useGraphStore.getState().resetSearchEngine();
 
-        // Update sizes for all nodes with discarded edges
+        // Update sizes for all nodes and edges
         updateNodeSizes(sigmaGraph, nodesWithDiscardedEdges, minDegree, maxDegree);
+        updateEdgeSizes(sigmaGraph, minWeight, maxWeight);
 
+        // Final update for the expanded node
         if (sigmaGraph.hasNode(nodeId)) {
           const finalDegree = sigmaGraph.degree(nodeId);
           const limitedDegree = Math.min(finalDegree, maxDegree + 1);
@@ -712,7 +968,7 @@ const useLightrangeGraph = () => {
   }, [nodeToExpand, sigmaGraph, rawGraph, t]);
 
   // Helper function to get all nodes that will be deleted
-  const getNodesThatWillBeDeleted = useCallback((nodeId: string, graph: DirectedGraph) => {
+  const getNodesThatWillBeDeleted = useCallback((nodeId: string, graph: UndirectedGraph) => {
     const nodesToDelete = new Set<string>([nodeId]);
 
     // Find all nodes that would become isolated after deletion
@@ -740,25 +996,25 @@ const useLightrangeGraph = () => {
       try {
         const state = useGraphStore.getState();
 
-        // 1. 检查节点是否存在
+        // 1. Check if node exists
         if (!sigmaGraph.hasNode(nodeId)) {
           console.error('Node not found:', nodeId);
           return;
         }
 
-        // 2. 获取要删除的节点
+        // 2. Get nodes to delete
         const nodesToDelete = getNodesThatWillBeDeleted(nodeId, sigmaGraph);
 
-        // 3. 检查是否会删除所有节点
+        // 3. Check if this would delete all nodes
         if (nodesToDelete.size === sigmaGraph.nodes().length) {
           toast.error(t('graphPanel.propertiesView.node.deleteAllNodesError'));
           return;
         }
 
-        // 4. 清除选中状态 - 这会导致PropertiesView立即关闭
+        // 4. Clear selection - this will cause PropertiesView to close immediately
         state.clearSelection();
 
-        // 5. 删除节点和相关边
+        // 5. Delete nodes and related edges
         for (const nodeToDelete of nodesToDelete) {
           // Remove the node from the sigma graph (this will also remove connected edges)
           sigmaGraph.dropNode(nodeToDelete);
@@ -840,7 +1096,7 @@ const useLightrangeGraph = () => {
 
     // If no graph exists yet, create a new one and store it
     console.log('Creating new Sigma graph instance')
-    const graph = new DirectedGraph()
+    const graph = new UndirectedGraph()
     useGraphStore.getState().setSigmaGraph(graph)
     return graph as Graph<NodeType, EdgeType>
   }, [sigmaGraph])

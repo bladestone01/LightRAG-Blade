@@ -1,4 +1,4 @@
-import { useCallback } from 'react'
+import { useCallback, useEffect } from 'react'
 import { AsyncSelect } from '@/components/ui/AsyncSelect'
 import { useSettingsStore } from '@/stores/settings'
 import { useGraphStore } from '@/stores/graph'
@@ -12,6 +12,7 @@ const GraphLabels = () => {
   const { t } = useTranslation()
   const label = useSettingsStore.use.queryLabel()
   const allDatabaseLabels = useGraphStore.use.allDatabaseLabels()
+  const labelsFetchAttempted = useGraphStore.use.labelsFetchAttempted()
 
   // Remove initial label fetch effect as it's now handled by fetchGraph based on lastSuccessfulQueryLabel
 
@@ -45,8 +46,30 @@ const GraphLabels = () => {
 
       let result: string[] = labels
       if (query) {
-        // Search labels
+        // Search labels using MiniSearch
         result = searchEngine.search(query).map((r: { id: number }) => labels[r.id])
+
+        // Add middle-content matching if results are few
+        // This enables matching content in the middle of text, not just from the beginning
+        if (result.length < 5) {
+          // Get already matched labels to avoid duplicates
+          const matchedLabels = new Set(result)
+
+          // Perform middle-content matching on all labels
+          const middleMatchResults = labels.filter(label => {
+            // Skip already matched labels
+            if (matchedLabels.has(label)) return false
+
+            // Match if label contains query string but doesn't start with it
+            return label &&
+                   typeof label === 'string' &&
+                   !label.toLowerCase().startsWith(query.toLowerCase()) &&
+                   label.toLowerCase().includes(query.toLowerCase())
+          })
+
+          // Merge results
+          result = [...result, ...middleMatchResults]
+        }
       }
 
       return result.length <= labelListLimit
@@ -55,6 +78,26 @@ const GraphLabels = () => {
     },
     [getSearchEngine]
   )
+
+  // Validate label
+  useEffect(() => {
+
+    if (labelsFetchAttempted) {
+      if (allDatabaseLabels.length > 1) {
+        if (label && label !== '*' && !allDatabaseLabels.includes(label)) {
+          console.log(`Label "${label}" not in available labels, setting to "*"`);
+          useSettingsStore.getState().setQueryLabel('*');
+        } else {
+          console.log(`Label "${label}" is valid`);
+        }
+      } else if (label && allDatabaseLabels.length <= 1 && label && label !== '*') {
+        console.log('Available labels list is empty, setting label to empty');
+        useSettingsStore.getState().setQueryLabel('');
+      }
+      useGraphStore.getState().setLabelsFetchAttempted(false)
+    }
+
+  }, [allDatabaseLabels, label, labelsFetchAttempted]);
 
   const handleRefresh = useCallback(() => {
     // Reset fetch status flags
@@ -87,12 +130,12 @@ const GraphLabels = () => {
         variant={controlButtonVariant}
         onClick={handleRefresh}
         tooltip={t('graphPanel.graphLabels.refreshTooltip')}
-        className="mr-1"
+        className="mr-2"
       >
         <RefreshCw className="h-4 w-4" />
       </Button>
       <AsyncSelect<string>
-        className="ml-2"
+        className="min-w-[300px]"
         triggerClassName="max-h-8"
         searchInputClassName="max-h-8"
         triggerTooltip={t('graphPanel.graphLabels.selectTooltip')}
