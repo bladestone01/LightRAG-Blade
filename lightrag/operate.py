@@ -174,14 +174,17 @@ async def _handle_single_entity_extraction(
     file_path: str = "unknown_source",
 ):
     """
-
+      处理大模型提取的实体的输出结果.
     Args:
         record_attributes:
         chunk_key:
         file_path:
-
     Returns:
-
+        entity_name: 名称
+        entity_type: 类型
+        description: 描述
+        source_id: 来源ID
+        file_path: 文件路径
     """
     if len(record_attributes) < 4 or record_attributes[0] != '"entity"':
         return None
@@ -229,6 +232,21 @@ async def _handle_single_relationship_extraction(
     chunk_key: str,
     file_path: str = "unknown_source",
 ):
+    """"
+       处理大模型提取的关系输出结果
+       Args:
+           record_attributes: 大模型提取的关系输出结果
+           chunk_key: 分块key
+           file_path: 文件路径
+        Returns:
+            src_id: 源节点ID
+            tgt_id: 目标节点ID
+            weight: 权重
+            description: 描述
+            keywords: 关键词
+            source_id: 来源ID
+            file_path: 文件路径
+    """
     if len(record_attributes) < 5 or record_attributes[0] != '"relationship"':
         return None
     # add this record as edge
@@ -269,6 +287,21 @@ async def _merge_nodes_then_upsert(
     pipeline_status_lock=None,
     llm_response_cache: BaseKVStorage | None = None,
 ):
+    """
+       去重优化图操作.
+
+    Args:
+        entity_name:
+        nodes_data:
+        knowledge_graph_inst:
+        global_config:
+        pipeline_status:
+        pipeline_status_lock:
+        llm_response_cache:
+
+    Returns:
+
+    """
     """Get existing nodes from knowledge graph use name,if exists, merge data, else create, then upsert."""
     already_entity_types = []
     already_source_ids = []
@@ -286,6 +319,8 @@ async def _merge_nodes_then_upsert(
         )
         already_description.append(already_node["description"])
 
+    # 统计重复的实体类型，并选择出现次数最多的类型作为最终的实体类型
+    # 原则： 出现次数最多的类型作为最终的实体类型
     entity_type = sorted(
         Counter(
             [dp["entity_type"] for dp in nodes_data] + already_entity_types
