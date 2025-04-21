@@ -52,8 +52,27 @@ def chunking_by_token_size(
     overlap_token_size: int = 128,
     max_token_size: int = 1024,
 ) -> list[dict[str, Any]]:
+    """
+       将给定的文本内容分割为多个标记块，每一个块的大小不超过max_token_size,
+       并且相邻块之间有overlap_token_size的overlap标记重叠区域大小.
+    Args:
+        tokenizer: 分词器
+        content: 需要分割的文本内容
+        split_by_character: 分割标志符号
+        split_by_character_only: 是否只分割标志符号
+        overlap_token_size: 标记重叠区域大小
+        max_token_size: 标记块最大大小
+    Returns:
+        list[dict[str, Any]]: 分割后的标记块列表
+          token: 该块包含的标记数量
+          content: 该块包含的标记内容
+          chunk_order_index: 该块在所有块中的顺序索引
+    """
+    # 内容按照token进行分割
     tokens = tokenizer.encode(content)
     results: list[dict[str, Any]] = []
+
+    # 是否仅仅按照分割标志符号进行分割
     if split_by_character:
         raw_chunks = content.split(split_by_character)
         new_chunks = []
@@ -62,6 +81,7 @@ def chunking_by_token_size(
                 _tokens = tokenizer.encode(chunk)
                 new_chunks.append((len(_tokens), chunk))
         else:
+            # 按照分割标志符号进行分割后，二次按照max_token_size和over_token_size进行分割
             for chunk in raw_chunks:
                 _tokens = tokenizer.encode(chunk)
                 if len(_tokens) > max_token_size:
@@ -85,6 +105,7 @@ def chunking_by_token_size(
                 }
             )
     else:
+        # 按照max_token_size和over_token_size进行分割
         for index, start in enumerate(
             range(0, len(tokens), max_token_size - overlap_token_size)
         ):
@@ -152,6 +173,16 @@ async def _handle_single_entity_extraction(
     chunk_key: str,
     file_path: str = "unknown_source",
 ):
+    """
+
+    Args:
+        record_attributes:
+        chunk_key:
+        file_path:
+
+    Returns:
+
+    """
     if len(record_attributes) < 4 or record_attributes[0] != '"entity"':
         return None
 
@@ -476,10 +507,27 @@ async def extract_entities(
     pipeline_status_lock=None,
     llm_response_cache: BaseKVStorage | None = None,
 ) -> None:
+    """
+       异步方式，从文本片段中提取实体和关系，并将它们存储到知识图谱和向量数据库中.
+    Args:
+        chunks: 包含待处理文本片段的字典
+        knowledge_graph_inst: 知识图谱实例，用于存储提取的实体和关系.
+        entity_vdb: 实体向量数据库实例，用于存储实体信息.
+        relationships_vdb: 关系向量数据库实例，用于存储关系信息.
+        global_config: 全局配置，用于控制提取实体和关系的行为, 包含LLLM模型函数和提取参数.
+        pipeline_status: 用于记录提取进度和日志的管道状态.
+        pipeline_status_lock: 用于保护管道状态的锁.
+        llm_response_cache: LLM响应缓存实例.
+    Returns:
+        None
+    """
+    # 从全局配置中获取LLM模型函数和最大抽取次数
     use_llm_func: callable = global_config["llm_model_func"]
     entity_extract_max_gleaning = global_config["entity_extract_max_gleaning"]
 
+    # 将chunks字典转化为列表，以按照顺序处理
     ordered_chunks = list(chunks.items())
+
     # add language and example number params to prompt
     language = global_config["addon_params"].get(
         "language", PROMPTS["DEFAULT_LANGUAGE"]
