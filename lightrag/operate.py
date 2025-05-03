@@ -269,6 +269,21 @@ async def _merge_nodes_then_upsert(
     pipeline_status_lock=None,
     llm_response_cache: BaseKVStorage | None = None,
 ):
+    """
+       去重函数，它识别并合并来自原始文本中不同片段的相同实体和关系。
+       通过最小化图的大小，有效减少与图操作相关的开销，从而实现更高效的数据处理.
+    Args:
+        entity_name:
+        nodes_data:
+        knowledge_graph_inst:
+        global_config:
+        pipeline_status:
+        pipeline_status_lock:
+        llm_response_cache:
+
+    Returns:
+
+    """
     """Get existing nodes from knowledge graph use name,if exists, merge data, else create, then upsert."""
     already_entity_types = []
     already_source_ids = []
@@ -839,7 +854,24 @@ async def kg_query(
     hashing_kv: BaseKVStorage | None = None,
     system_prompt: str | None = None,
 ) -> str | AsyncIterator[str]:
-    # Handle cache
+    """
+      图谱检索入口，与提取文档实体关系一样，需要利用与定义的专门模版调用大模型提取检索关键词。
+      大模型提取两类关键词： low_level_keywords, high_level_keywords分别用于local和global模式.
+    Args:
+        query:
+        knowledge_graph_inst:
+        entities_vdb:
+        relationships_vdb:
+        text_chunks_db:
+        query_param:
+        global_config:
+        hashing_kv:
+        system_prompt:
+
+    Returns:
+
+    """
+    # Handle cache, if hit cache, return cached response
     use_model_func = (
         query_param.model_func
         if query_param.model_func
@@ -852,6 +884,7 @@ async def kg_query(
     if cached_response is not None:
         return cached_response
 
+    # Extract keywords
     hl_keywords, ll_keywords = await get_keywords_from_query(
         query, query_param, global_config, hashing_kv
     )
@@ -1984,6 +2017,19 @@ async def naive_query(
     hashing_kv: BaseKVStorage | None = None,
     system_prompt: str | None = None,
 ) -> str | AsyncIterator[str]:
+    """
+       基于向量特征的查询.
+    Args:
+        query: 查询语句
+        chunks_vdb: 向量数据库
+        text_chunks_db: 储存文本块的数据库
+        query_param: 查询参数
+        global_config: 全局配置字典
+        hashing_kv: 缓存
+        system_prompt: 系统提示
+    Returns:
+
+    """
     # Handle cache
     use_model_func = (
         query_param.model_func
