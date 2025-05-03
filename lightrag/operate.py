@@ -14,7 +14,6 @@ from .utils import (
     compute_mdhash_id,
     Tokenizer,
     is_float_regex,
-    list_of_list_to_csv,
     normalize_extracted_info,
     pack_user_ass_to_openai_messages,
     split_string_by_multi_markers,
@@ -163,7 +162,6 @@ async def _handle_single_entity_extraction(
     Returns:
 
     """
-    if len(record_attributes) < 4 or record_attributes[0] != '"entity"':
     if len(record_attributes) < 4 or '"entity"' not in record_attributes[0]:
         return None
 
