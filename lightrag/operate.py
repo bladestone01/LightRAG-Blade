@@ -14,7 +14,6 @@ from .utils import (
     compute_mdhash_id,
     Tokenizer,
     is_float_regex,
-    list_of_list_to_csv,
     normalize_extracted_info,
     pack_user_ass_to_openai_messages,
     split_string_by_multi_markers,
@@ -26,6 +25,7 @@ from .utils import (
     CacheData,
     get_conversation_turns,
     use_llm_func_with_cache,
+    list_of_list_to_json
 )
 from .base import (
     BaseGraphStorage,
@@ -186,7 +186,7 @@ async def _handle_single_entity_extraction(
         source_id: 来源ID
         file_path: 文件路径
     """
-    if len(record_attributes) < 4 or record_attributes[0] != '"entity"':
+    if len(record_attributes) < 4 or '"entity"' not in record_attributes[0]:
         return None
 
     # Clean and validate entity name
@@ -247,7 +247,7 @@ async def _handle_single_relationship_extraction(
             source_id: 来源ID
             file_path: 文件路径
     """
-    if len(record_attributes) < 5 or record_attributes[0] != '"relationship"':
+    if len(record_attributes) < 5 or '"relationship"' not in record_attributes[0]:
         return None
     # add this record as edge
     source = clean_str(record_attributes[1])
@@ -264,7 +264,7 @@ async def _handle_single_relationship_extraction(
     edge_source_id = chunk_key
     weight = (
         float(record_attributes[-1].strip('"').strip("'"))
-        if is_float_regex(record_attributes[-1])
+        if is_float_regex(record_attributes[-1].strip('"').strip("'"))
         else 1.0
     )
     return dict(
@@ -288,8 +288,8 @@ async def _merge_nodes_then_upsert(
     llm_response_cache: BaseKVStorage | None = None,
 ):
     """
-       去重优化图操作.
-
+       去重函数，它识别并合并来自原始文本中不同片段的相同实体和关系。
+       通过最小化图的大小，有效减少与图操作相关的开销，从而实现更高效的数据处理.
     Args:
         entity_name:
         nodes_data:
