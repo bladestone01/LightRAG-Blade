@@ -119,6 +119,7 @@ class LightRAG:
     """Maximum number of entity extraction attempts for ambiguous content."""
 
     summary_to_max_tokens: int = field(default=int(os.getenv("MAX_TOKEN_SUMMARY", 500)))
+    """设置摘要的最大token数"""
 
     force_llm_summary_on_merge: int = field(
         default=int(os.getenv("FORCE_LLM_SUMMARY_ON_MERGE", 6))
