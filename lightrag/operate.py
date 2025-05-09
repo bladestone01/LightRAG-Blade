@@ -52,8 +52,27 @@ def chunking_by_token_size(
     overlap_token_size: int = 128,
     max_token_size: int = 1024,
 ) -> list[dict[str, Any]]:
+    """
+       将给定的文本内容分割为多个标记块，每一个块的大小不超过max_token_size,
+       并且相邻块之间有overlap_token_size的overlap标记重叠区域大小.
+    Args:
+        tokenizer: 分词器
+        content: 需要分割的文本内容
+        split_by_character: 分割标志符号
+        split_by_character_only: 是否只分割标志符号
+        overlap_token_size: 标记重叠区域大小
+        max_token_size: 标记块最大大小
+    Returns:
+        list[dict[str, Any]]: 分割后的标记块列表
+          token: 该块包含的标记数量
+          content: 该块包含的标记内容
+          chunk_order_index: 该块在所有块中的顺序索引
+    """
+    # 内容按照token进行分割
     tokens = tokenizer.encode(content)
     results: list[dict[str, Any]] = []
+
+    # 是否仅仅按照分割标志符号进行分割
     if split_by_character:
         raw_chunks = content.split(split_by_character)
         new_chunks = []
@@ -62,6 +81,7 @@ def chunking_by_token_size(
                 _tokens = tokenizer.encode(chunk)
                 new_chunks.append((len(_tokens), chunk))
         else:
+            # 按照分割标志符号进行分割后，二次按照max_token_size和over_token_size进行分割
             for chunk in raw_chunks:
                 _tokens = tokenizer.encode(chunk)
                 if len(_tokens) > max_token_size:
@@ -85,6 +105,7 @@ def chunking_by_token_size(
                 }
             )
     else:
+        # 按照max_token_size和over_token_size进行分割
         for index, start in enumerate(
             range(0, len(tokens), max_token_size - overlap_token_size)
         ):
@@ -153,14 +174,17 @@ async def _handle_single_entity_extraction(
     file_path: str = "unknown_source",
 ):
     """
-
+      处理大模型提取的实体的输出结果.
     Args:
         record_attributes:
         chunk_key:
         file_path:
-
     Returns:
-
+        entity_name: 名称
+        entity_type: 类型
+        description: 描述
+        source_id: 来源ID
+        file_path: 文件路径
     """
     if len(record_attributes) < 4 or '"entity"' not in record_attributes[0]:
         return None
@@ -208,6 +232,21 @@ async def _handle_single_relationship_extraction(
     chunk_key: str,
     file_path: str = "unknown_source",
 ):
+    """"
+       处理大模型提取的关系输出结果
+       Args:
+           record_attributes: 大模型提取的关系输出结果
+           chunk_key: 分块key
+           file_path: 文件路径
+        Returns:
+            src_id: 源节点ID
+            tgt_id: 目标节点ID
+            weight: 权重
+            description: 描述
+            keywords: 关键词
+            source_id: 来源ID
+            file_path: 文件路径
+    """
     if len(record_attributes) < 5 or '"relationship"' not in record_attributes[0]:
         return None
     # add this record as edge
@@ -280,6 +319,8 @@ async def _merge_nodes_then_upsert(
         )
         already_description.append(already_node["description"])
 
+    # 统计重复的实体类型，并选择出现次数最多的类型作为最终的实体类型
+    # 原则： 出现次数最多的类型作为最终的实体类型
     entity_type = sorted(
         Counter(
             [dp["entity_type"] for dp in nodes_data] + already_entity_types
@@ -425,16 +466,6 @@ async def _merge_edges_then_upsert(
 
     for need_insert_id in [src_id, tgt_id]:
         if not (await knowledge_graph_inst.has_node(need_insert_id)):
-            # # Discard this edge if the node does not exist
-            # if need_insert_id == src_id:
-            #     logger.warning(
-            #         f"Discard edge: {src_id} - {tgt_id} | Source node missing"
-            #     )
-            # else:
-            #     logger.warning(
-            #         f"Discard edge: {src_id} - {tgt_id} | Target node missing"
-            #     )
-            # return None
             await knowledge_graph_inst.upsert_node(
                 need_insert_id,
                 node_data={
@@ -644,8 +675,8 @@ async def extract_entities(
 
         # Get initial extraction
         hint_prompt = entity_extract_prompt.format(
-            **{**context_base, "input_text": content}
-        )
+            **context_base, input_text="{input_text}"
+        ).format(**context_base, input_text=content)
 
         final_result = await use_llm_func_with_cache(
             hint_prompt,
@@ -716,17 +747,11 @@ async def extract_entities(
         # Return the extracted nodes and edges for centralized processing
         return maybe_nodes, maybe_edges
 
-    # Get max async tasks limit from global_config
-    llm_model_max_async = global_config.get("llm_model_max_async", 4)
-    semaphore = asyncio.Semaphore(llm_model_max_async)
-
-    async def _process_with_semaphore(chunk):
-        async with semaphore:
-            return await _process_single_content(chunk)
-
+    # Handle all chunks in parallel and collect results
+    # Create tasks for all chunks
     tasks = []
     for c in ordered_chunks:
-        task = asyncio.create_task(_process_with_semaphore(c))
+        task = asyncio.create_task(_process_single_content(c))
         tasks.append(task)
 
     # Wait for tasks to complete or for the first exception to occur
@@ -796,19 +821,7 @@ async def extract_entities(
                 pipeline_status_lock,
                 llm_response_cache,
             )
-            if edge_data is not None:
-                relationships_data.append(edge_data)
-
-        # Update total counts
-        total_entities_count = len(entities_data)
-        total_relations_count = len(relationships_data)
-
-        log_message = f"Updating vector storage: {total_entities_count} entities..."
-        logger.info(log_message)
-        if pipeline_status is not None:
-            async with pipeline_status_lock:
-                pipeline_status["latest_message"] = log_message
-                pipeline_status["history_messages"].append(log_message)
+            relationships_data.append(edge_data)
 
         # Update vector databases with all collected data
         if entity_vdb is not None and entities_data:
@@ -823,15 +836,6 @@ async def extract_entities(
                 for dp in entities_data
             }
             await entity_vdb.upsert(data_for_vdb)
-
-        log_message = (
-            f"Updating vector storage: {total_relations_count} relationships..."
-        )
-        logger.info(log_message)
-        if pipeline_status is not None:
-            async with pipeline_status_lock:
-                pipeline_status["latest_message"] = log_message
-                pipeline_status["history_messages"].append(log_message)
 
         if relationships_vdb is not None and relationships_data:
             data_for_vdb = {
@@ -870,24 +874,7 @@ async def kg_query(
     hashing_kv: BaseKVStorage | None = None,
     system_prompt: str | None = None,
 ) -> str | AsyncIterator[str]:
-    """
-      图谱检索入口，与提取文档实体关系一样，需要利用与定义的专门模版调用大模型提取检索关键词。
-      大模型提取两类关键词： low_level_keywords, high_level_keywords分别用于local和global模式.
-    Args:
-        query:
-        knowledge_graph_inst:
-        entities_vdb:
-        relationships_vdb:
-        text_chunks_db:
-        query_param:
-        global_config:
-        hashing_kv:
-        system_prompt:
-
-    Returns:
-
-    """
-    # Handle cache, if hit cache, return cached response
+    # Handle cache
     use_model_func = (
         query_param.model_func
         if query_param.model_func
@@ -900,7 +887,6 @@ async def kg_query(
     if cached_response is not None:
         return cached_response
 
-    # Extract keywords
     hl_keywords, ll_keywords = await get_keywords_from_query(
         query, query_param, global_config, hashing_kv
     )
@@ -1261,13 +1247,6 @@ async def mix_kg_vector_query(
                 tokenizer=tokenizer,
             )
 
-            logger.debug(
-                f"Truncate chunks from {len(valid_chunks)} to {len(maybe_trun_chunks)} (max tokens:{query_param.max_token_for_text_unit})"
-            )
-            logger.info(
-                f"Naive query: {len(maybe_trun_chunks)} chunks, top_k: {mix_topk}"
-            )
-
             if not maybe_trun_chunks:
                 return None
 
@@ -1424,33 +1403,23 @@ async def _build_query_context(
             [hl_text_units_context, ll_text_units_context],
         )
     # not necessary to use LLM to generate a response
-    if not entities_context and not relations_context:
+    if not entities_context.strip() and not relations_context.strip():
         return None
 
-    # 转换为 JSON 字符串
-    entities_str = json.dumps(entities_context, ensure_ascii=False)
-    relations_str = json.dumps(relations_context, ensure_ascii=False)
-    text_units_str = json.dumps(text_units_context, ensure_ascii=False)
-
-    result = f"""-----Entities-----
-
-```json
-{entities_str}
-```
-
------Relationships-----
-
-```json
-{relations_str}
-```
-
------Sources-----
-
-```json
-{text_units_str}
-```
-
-"""
+    result = f"""
+    -----Entities-----
+    ```csv
+    {entities_context}
+    ```
+    -----Relationships-----
+    ```csv
+    {relations_context}
+    ```
+    -----Sources-----
+    ```csv
+    {text_units_context}
+    ```
+    """.strip()
     return result
 
 
@@ -1554,7 +1523,7 @@ async def _get_node_data(
                 file_path,
             ]
         )
-    entities_context = list_of_list_to_json(entites_section_list)
+    entities_context = list_of_list_to_csv(entites_section_list)
 
     relations_section_list = [
         [
@@ -1591,14 +1560,14 @@ async def _get_node_data(
                 file_path,
             ]
         )
-    relations_context = list_of_list_to_json(relations_section_list)
+    relations_context = list_of_list_to_csv(relations_section_list)
 
     text_units_section_list = [["id", "content", "file_path"]]
     for i, t in enumerate(use_text_units):
         text_units_section_list.append(
             [i, t["content"], t.get("file_path", "unknown_source")]
         )
-    text_units_context = list_of_list_to_json(text_units_section_list)
+    text_units_context = list_of_list_to_csv(text_units_section_list)
     return entities_context, relations_context, text_units_context
 
 
@@ -1876,7 +1845,7 @@ async def _get_edge_data(
                 file_path,
             ]
         )
-    relations_context = list_of_list_to_json(relations_section_list)
+    relations_context = list_of_list_to_csv(relations_section_list)
 
     entites_section_list = [
         ["id", "entity", "type", "description", "rank", "created_at", "file_path"]
@@ -1901,12 +1870,12 @@ async def _get_edge_data(
                 file_path,
             ]
         )
-    entities_context = list_of_list_to_json(entites_section_list)
+    entities_context = list_of_list_to_csv(entites_section_list)
 
     text_units_section_list = [["id", "content", "file_path"]]
     for i, t in enumerate(use_text_units):
         text_units_section_list.append([i, t["content"], t.get("file_path", "unknown")])
-    text_units_context = list_of_list_to_json(text_units_section_list)
+    text_units_context = list_of_list_to_csv(text_units_section_list)
     return entities_context, relations_context, text_units_context
 
 
@@ -2050,19 +2019,6 @@ async def naive_query(
     hashing_kv: BaseKVStorage | None = None,
     system_prompt: str | None = None,
 ) -> str | AsyncIterator[str]:
-    """
-       基于向量特征的查询.
-    Args:
-        query: 查询语句
-        chunks_vdb: 向量数据库
-        text_chunks_db: 储存文本块的数据库
-        query_param: 查询参数
-        global_config: 全局配置字典
-        hashing_kv: 缓存
-        system_prompt: 系统提示
-    Returns:
-
-    """
     # Handle cache
     use_model_func = (
         query_param.model_func
@@ -2109,9 +2065,6 @@ async def naive_query(
     logger.debug(
         f"Truncate chunks from {len(chunks)} to {len(maybe_trun_chunks)} (max tokens:{query_param.max_token_for_text_unit})"
     )
-    logger.info(
-        f"Naive query: {len(maybe_trun_chunks)} chunks, top_k: {query_param.top_k}"
-    )
 
     section = "\n--New Chunk--\n".join(
         [
@@ -2153,7 +2106,7 @@ async def naive_query(
         logger.info(f"[naive_query]Streaming Response:{response}")
         return response
 
-    if isinstance(response, str) and len(response) > len(sys_prompt):
+    if len(response) > len(sys_prompt):
         response = (
             response[len(sys_prompt) :]
             .replace(sys_prompt, "")
