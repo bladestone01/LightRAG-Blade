@@ -102,9 +102,28 @@ lightrag-gunicorn --workers 4
 - `--log-level`：日志级别（默认：INFO）
 - --input-dir：指定要扫描文档的目录（默认：./input）
 
-> ** 要求将.env文件置于启动目录中是经过特意设计的**。 这样做的目的是支持用户同时启动多个LightRAG实例，并为不同实例配置不同的.env文件。
+> - **要求将.env文件置于启动目录中是经过特意设计的**。 这样做的目的是支持用户同时启动多个LightRAG实例，并为不同实例配置不同的.env文件。
+> - **修改.env文件后，您需要重新打开终端以使新设置生效**。 这是因为每次启动时，LightRAG Server会将.env文件中的环境变量加载至系统环境变量，且系统环境变量的设置具有更高优先级。
 
-> **修改.env文件后，您需要重新打开终端以使新设置生效**。 这是因为每次启动时，LightRAG Server会将.env文件中的环境变量加载至系统环境变量，且系统环境变量的设置具有更高优先级。
+### 使用 Docker Compose 启动 LightRAG 服务器
+
+* 克隆代码仓库：
+```
+git clone https://github.com/HKUDS/LightRAG.git
+cd LightRAG
+```
+
+* 配置 .env 文件：
+    通过复制 env.example 文件创建个性化的 .env 文件，并根据实际需求设置 LLM 及 Embedding 参数。
+
+* 通过以下命令启动 LightRAG 服务器：
+```
+docker compose up
+# 如拉取了新版本，请添加 --build 重新构建
+docker compose up --build
+```
+
+> 在此获取LightRAG docker镜像历史版本: [LightRAG Docker Images]( https://github.com/HKUDS/LightRAG/pkgs/container/lightrag)
 
 ### 启动时自动扫描
 
@@ -133,7 +152,7 @@ MAX_ASYNC=4
 
 ### 将 Lightrag 安装为 Linux 服务
 
-从示例文件 `lightrag.sevice.example` 创建您的服务文件 `lightrag.sevice`。修改服务文件中的 WorkingDirectory 和 ExecStart：
+从示例文件 `lightrag.service.example` 创建您的服务文件 `lightrag.service`。修改服务文件中的 WorkingDirectory 和 ExecStart：
 
 ```text
 Description=LightRAG Ollama Service
@@ -201,6 +220,15 @@ Open WebUI 使用 LLM 来执行会话标题和会话关键词生成任务。因�
 "/bypass" 不是 LightRAG 查询模式，它会告诉 API 服务器将查询连同聊天历史直接传递给底层 LLM。因此用户可以使用 LLM 基于聊天历史回答问题。如果您使用 Open WebUI 作为前端，您可以直接切换到普通 LLM 模型，而不是使用 /bypass 前缀。
 
 "/context" 也不是 LightRAG 查询模式，它会告诉 LightRAG 只返回为 LLM 准备的上下文信息。您可以检查上下文是否符合您的需求，或者自行处理上下文。
+
+### 在聊天中添加用户提示词
+
+使用LightRAG进行内容查询时，应避免将搜索过程与无关的输出处理相结合，这会显著影响查询效果。用户提示（user prompt）正是为解决这一问题而设计 -- 它不参与RAG检索阶段，而是在查询完成后指导大语言模型（LLM）如何处理检索结果。我们可以在查询前缀末尾添加方括号，从而向LLM传递用户提示词：
+
+```
+/[使用mermaid格式画图] 请画出 Scrooge 的人物关系图谱
+/mix[使用mermaid格式画图] 请画出 Scrooge 的人物关系图谱
+```
 
 ## API 密钥和认证
 

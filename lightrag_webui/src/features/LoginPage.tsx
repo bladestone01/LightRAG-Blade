@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '@/stores/state'
+import { useSettingsStore } from '@/stores/settings'
 import { loginToServer, getAuthStatus } from '@/api/lightrag'
 import { toast } from 'sonner'
 import { useTranslation } from 'react-i18next'
@@ -94,6 +95,24 @@ const LoginPage = () => {
       setLoading(true)
       const response = await loginToServer(username, password)
 
+      // Get previous username from localStorage
+      const previousUsername = localStorage.getItem('LIGHTRAG-PREVIOUS-USER')
+
+      // Check if it's the same user logging in again
+      const isSameUser = previousUsername === username
+
+      // If it's not the same user, clear chat history
+      if (isSameUser) {
+        console.log('Same user logging in, preserving chat history')
+      } else {
+        console.log('Different user logging in, clearing chat history')
+        // Directly clear chat history instead of setting a flag
+        useSettingsStore.getState().setRetrievalHistory([])
+      }
+
+      // Update previous username
+      localStorage.setItem('LIGHTRAG-PREVIOUS-USER', username)
+
       // Check authentication mode
       const isGuestMode = response.auth_mode === 'disabled'
       login(response.access_token, isGuestMode, response.core_version, response.api_version, response.webui_title || null, response.webui_description || null)
@@ -134,7 +153,7 @@ const LoginPage = () => {
         <CardHeader className="flex items-center justify-center space-y-2 pb-8 pt-6">
           <div className="flex flex-col items-center space-y-4">
             <div className="flex items-center gap-3">
-              <img src="logo.png" alt="LightRAG Logo" className="h-12 w-12" />
+              <img src="logo.svg" alt="LightRAG Logo" className="h-12 w-12" />
               <ZapIcon className="size-10 text-emerald-400" aria-hidden="true" />
             </div>
             <div className="text-center space-y-2">

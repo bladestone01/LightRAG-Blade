@@ -1,7 +1,8 @@
 import asyncio
 import json
 import os
-import time
+import datetime
+from datetime import timezone
 from dataclasses import dataclass, field
 from typing import Any, Union, final
 import numpy as np
@@ -54,7 +55,7 @@ class PostgreSQLDB:
         self.password = config.get("password", None)
         self.database = config.get("database", "postgres")
         self.workspace = config.get("workspace", "default")
-        self.max = 12
+        self.max = int(config.get("max_connections", 12))
         self.increment = 1
         self.pool: Pool | None = None
 
@@ -105,7 +106,61 @@ class PostgreSQLDB:
         ):
             pass
 
+    async def _migrate_timestamp_columns(self):
+        """Migrate timestamp columns in tables to timezone-aware types, assuming original data is in UTC time"""
+        # Tables and columns that need migration
+        tables_to_migrate = {
+            "LIGHTRAG_VDB_ENTITY": ["create_time", "update_time"],
+            "LIGHTRAG_VDB_RELATION": ["create_time", "update_time"],
+            "LIGHTRAG_DOC_CHUNKS": ["create_time", "update_time"],
+        }
+
+        for table_name, columns in tables_to_migrate.items():
+            for column_name in columns:
+                try:
+                    # Check if column exists
+                    check_column_sql = f"""
+                    SELECT column_name, data_type
+                    FROM information_schema.columns
+                    WHERE table_name = '{table_name.lower()}'
+                    AND column_name = '{column_name}'
+                    """
+
+                    column_info = await self.query(check_column_sql)
+                    if not column_info:
+                        logger.warning(
+                            f"Column {table_name}.{column_name} does not exist, skipping migration"
+                        )
+                        continue
+
+                    # Check column type
+                    data_type = column_info.get("data_type")
+                    if data_type == "timestamp with time zone":
+                        logger.info(
+                            f"Column {table_name}.{column_name} is already timezone-aware, no migration needed"
+                        )
+                        continue
+
+                    # Execute migration, explicitly specifying UTC timezone for interpreting original data
+                    logger.info(
+                        f"Migrating {table_name}.{column_name} to timezone-aware type"
+                    )
+                    migration_sql = f"""
+                    ALTER TABLE {table_name}
+                    ALTER COLUMN {column_name} TYPE TIMESTAMP(0) WITH TIME ZONE
+                    USING {column_name} AT TIME ZONE 'UTC'
+                    """
+
+                    await self.execute(migration_sql)
+                    logger.info(
+                        f"Successfully migrated {table_name}.{column_name} to timezone-aware type"
+                    )
+                except Exception as e:
+                    # Log error but don't interrupt the process
+                    logger.warning(f"Failed to migrate {table_name}.{column_name}: {e}")
+
     async def check_tables(self):
+        # First create all tables
         for k, v in TABLES.items():
             try:
                 await self.query(f"SELECT 1 FROM {k} LIMIT 1")
@@ -140,6 +195,13 @@ class PostgreSQLDB:
                 logger.error(
                     f"PostgreSQL, Failed to create index on table {k}, Got: {e}"
                 )
+
+        # After all tables are created, attempt to migrate timestamp fields
+        try:
+            await self._migrate_timestamp_columns()
+        except Exception as e:
+            logger.error(f"PostgreSQL, Failed to migrate timestamp columns: {e}")
+            # Don't throw an exception, allow the initialization process to continue
 
     async def query(
         self,
@@ -249,6 +311,10 @@ class ClientManager:
             "workspace": os.environ.get(
                 "POSTGRES_WORKSPACE",
                 config.get("postgres", "workspace", fallback="default"),
+            ),
+            "max_connections": os.environ.get(
+                "POSTGRES_MAX_CONNECTIONS",
+                config.get("postgres", "max_connections", fallback=12),
             ),
         }
 
@@ -544,7 +610,9 @@ class PGVectorStorage(BaseVectorStorage):
             await ClientManager.release_client(self.db)
             self.db = None
 
-    def _upsert_chunks(self, item: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+    def _upsert_chunks(
+        self, item: dict[str, Any], current_time: datetime.datetime
+    ) -> tuple[str, dict[str, Any]]:
         try:
             upsert_sql = SQL_TEMPLATES["upsert_chunk"]
             data: dict[str, Any] = {
@@ -556,6 +624,8 @@ class PGVectorStorage(BaseVectorStorage):
                 "content": item["content"],
                 "content_vector": json.dumps(item["__vector__"].tolist()),
                 "file_path": item["file_path"],
+                "create_time": current_time,
+                "update_time": current_time,
             }
         except Exception as e:
             logger.error(f"Error to prepare upsert,\nsql: {e}\nitem: {item}")
@@ -563,7 +633,9 @@ class PGVectorStorage(BaseVectorStorage):
 
         return upsert_sql, data
 
-    def _upsert_entities(self, item: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+    def _upsert_entities(
+        self, item: dict[str, Any], current_time: datetime.datetime
+    ) -> tuple[str, dict[str, Any]]:
         upsert_sql = SQL_TEMPLATES["upsert_entity"]
         source_id = item["source_id"]
         if isinstance(source_id, str) and "<SEP>" in source_id:
@@ -578,12 +650,15 @@ class PGVectorStorage(BaseVectorStorage):
             "content": item["content"],
             "content_vector": json.dumps(item["__vector__"].tolist()),
             "chunk_ids": chunk_ids,
-            "file_path": item["file_path"],
-            # TODO: add document_id
+            "file_path": item.get("file_path", None),
+            "create_time": current_time,
+            "update_time": current_time,
         }
         return upsert_sql, data
 
-    def _upsert_relationships(self, item: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+    def _upsert_relationships(
+        self, item: dict[str, Any], current_time: datetime.datetime
+    ) -> tuple[str, dict[str, Any]]:
         upsert_sql = SQL_TEMPLATES["upsert_relationship"]
         source_id = item["source_id"]
         if isinstance(source_id, str) and "<SEP>" in source_id:
@@ -599,8 +674,9 @@ class PGVectorStorage(BaseVectorStorage):
             "content": item["content"],
             "content_vector": json.dumps(item["__vector__"].tolist()),
             "chunk_ids": chunk_ids,
-            "file_path": item["file_path"],
-            # TODO: add document_id
+            "file_path": item.get("file_path", None),
+            "create_time": current_time,
+            "update_time": current_time,
         }
         return upsert_sql, data
 
@@ -609,11 +685,11 @@ class PGVectorStorage(BaseVectorStorage):
         if not data:
             return
 
-        current_time = time.time()
+        # Get current time with UTC timezone
+        current_time = datetime.datetime.now(timezone.utc)
         list_data = [
             {
                 "__id__": k,
-                "__created_at__": current_time,
                 **{k1: v1 for k1, v1 in v.items()},
             }
             for k, v in data.items()
@@ -632,11 +708,11 @@ class PGVectorStorage(BaseVectorStorage):
             d["__vector__"] = embeddings[i]
         for item in list_data:
             if is_namespace(self.namespace, NameSpace.VECTOR_STORE_CHUNKS):
-                upsert_sql, data = self._upsert_chunks(item)
+                upsert_sql, data = self._upsert_chunks(item, current_time)
             elif is_namespace(self.namespace, NameSpace.VECTOR_STORE_ENTITIES):
-                upsert_sql, data = self._upsert_entities(item)
+                upsert_sql, data = self._upsert_entities(item, current_time)
             elif is_namespace(self.namespace, NameSpace.VECTOR_STORE_RELATIONSHIPS):
-                upsert_sql, data = self._upsert_relationships(item)
+                upsert_sql, data = self._upsert_relationships(item, current_time)
             else:
                 raise ValueError(f"{self.namespace} is not supported")
 
@@ -646,7 +722,9 @@ class PGVectorStorage(BaseVectorStorage):
     async def query(
         self, query: str, top_k: int, ids: list[str] | None = None
     ) -> list[dict[str, Any]]:
-        embeddings = await self.embedding_func([query])
+        embeddings = await self.embedding_func(
+            [query], _priority=5
+        )  # higher priority for query
         embedding = embeddings[0]
         embedding_string = ",".join(map(str, embedding))
         # Use parameterized document IDs (None means search across all documents)
@@ -726,41 +804,6 @@ class PGVectorStorage(BaseVectorStorage):
         except Exception as e:
             logger.error(f"Error deleting relations for entity {entity_name}: {e}")
 
-    async def search_by_prefix(self, prefix: str) -> list[dict[str, Any]]:
-        """Search for records with IDs starting with a specific prefix.
-
-        Args:
-            prefix: The prefix to search for in record IDs
-
-        Returns:
-            List of records with matching ID prefixes
-        """
-        table_name = namespace_to_table_name(self.namespace)
-        if not table_name:
-            logger.error(f"Unknown namespace for prefix search: {self.namespace}")
-            return []
-
-        search_sql = f"SELECT * FROM {table_name} WHERE workspace=$1 AND id LIKE $2"
-        params = {"workspace": self.db.workspace, "prefix": f"{prefix}%"}
-
-        try:
-            results = await self.db.query(search_sql, params, multirows=True)
-            logger.debug(f"Found {len(results)} records with prefix '{prefix}'")
-
-            # Format results to match the expected return format
-            formatted_results = []
-            for record in results:
-                formatted_record = dict(record)
-                # Ensure id field is available (for consistency with NanoVectorDB implementation)
-                if "id" not in formatted_record:
-                    formatted_record["id"] = record["id"]
-                formatted_results.append(formatted_record)
-
-            return formatted_results
-        except Exception as e:
-            logger.error(f"Error during prefix search for '{prefix}': {e}")
-            return []
-
     async def get_by_id(self, id: str) -> dict[str, Any] | None:
         """Get vector data by its ID
 
@@ -775,7 +818,7 @@ class PGVectorStorage(BaseVectorStorage):
             logger.error(f"Unknown namespace for ID lookup: {self.namespace}")
             return None
 
-        query = f"SELECT * FROM {table_name} WHERE workspace=$1 AND id=$2"
+        query = f"SELECT *, EXTRACT(EPOCH FROM create_time)::BIGINT as created_at FROM {table_name} WHERE workspace=$1 AND id=$2"
         params = {"workspace": self.db.workspace, "id": id}
 
         try:
@@ -805,7 +848,7 @@ class PGVectorStorage(BaseVectorStorage):
             return []
 
         ids_str = ",".join([f"'{id}'" for id in ids])
-        query = f"SELECT * FROM {table_name} WHERE workspace=$1 AND id IN ({ids_str})"
+        query = f"SELECT *, EXTRACT(EPOCH FROM create_time)::BIGINT as created_at FROM {table_name} WHERE workspace=$1 AND id IN ({ids_str})"
         params = {"workspace": self.db.workspace}
 
         try:
@@ -992,8 +1035,28 @@ class PGDocStatusStorage(DocStatusStorage):
         if not data:
             return
 
-        sql = """insert into LIGHTRAG_DOC_STATUS(workspace,id,content,content_summary,content_length,chunks_count,status,file_path)
-                 values($1,$2,$3,$4,$5,$6,$7,$8)
+        def parse_datetime(dt_str):
+            if dt_str is None:
+                return None
+            if isinstance(dt_str, (datetime.date, datetime.datetime)):
+                # If it's a datetime object without timezone info, remove timezone info
+                if isinstance(dt_str, datetime.datetime):
+                    # Remove timezone info, return naive datetime object
+                    return dt_str.replace(tzinfo=None)
+                return dt_str
+            try:
+                # Process ISO format string with timezone
+                dt = datetime.datetime.fromisoformat(dt_str)
+                # Remove timezone info, return naive datetime object
+                return dt.replace(tzinfo=None)
+            except (ValueError, TypeError):
+                logger.warning(f"Unable to parse datetime string: {dt_str}")
+                return None
+
+        # Modified SQL to include created_at and updated_at in both INSERT and UPDATE operations
+        # Both fields are updated from the input data in both INSERT and UPDATE cases
+        sql = """insert into LIGHTRAG_DOC_STATUS(workspace,id,content,content_summary,content_length,chunks_count,status,file_path,created_at,updated_at)
+                 values($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
                   on conflict(id,workspace) do update set
                   content = EXCLUDED.content,
                   content_summary = EXCLUDED.content_summary,
@@ -1001,8 +1064,13 @@ class PGDocStatusStorage(DocStatusStorage):
                   chunks_count = EXCLUDED.chunks_count,
                   status = EXCLUDED.status,
                   file_path = EXCLUDED.file_path,
-                  updated_at = CURRENT_TIMESTAMP"""
+                  created_at = EXCLUDED.created_at,
+                  updated_at = EXCLUDED.updated_at"""
         for k, v in data.items():
+            # Remove timezone information, store utc time in db
+            created_at = parse_datetime(v.get("created_at"))
+            updated_at = parse_datetime(v.get("updated_at"))
+
             # chunks_count is optional
             await self.db.execute(
                 sql,
@@ -1015,6 +1083,8 @@ class PGDocStatusStorage(DocStatusStorage):
                     "chunks_count": v["chunks_count"] if "chunks_count" in v else -1,
                     "status": v["status"],
                     "file_path": v["file_path"],
+                    "created_at": created_at,  # Use the converted datetime object
+                    "updated_at": updated_at,  # Use the converted datetime object
                 },
             )
 
@@ -1083,7 +1153,7 @@ class PGGraphStorage(BaseGraphStorage):
         if self.db is None:
             self.db = await ClientManager.get_client()
 
-        # 分别执行每个语句，忽略错误
+        # Execute each statement separately and ignore errors
         queries = [
             f"SELECT create_graph('{self.graph_name}')",
             f"SELECT create_vlabel('{self.graph_name}', 'base');",
@@ -1112,7 +1182,7 @@ class PGGraphStorage(BaseGraphStorage):
                     with_age=True,
                     graph_name=self.graph_name,
                 )
-                logger.info(f"Successfully executed: {query}")
+                # logger.info(f"Successfully executed: {query}")
             except Exception:
                 continue
 
@@ -1186,15 +1256,7 @@ class PGGraphStorage(BaseGraphStorage):
                     elif dtype == "edge":
                         d[k] = json.loads(v)
             else:
-                try:
-                    d[k] = (
-                        json.loads(v)
-                        if isinstance(v, str)
-                        and (v.startswith("{") or v.startswith("["))
-                        else v
-                    )
-                except json.JSONDecodeError:
-                    d[k] = v
+                d[k] = v  # Keep as string
 
         return d
 
@@ -1315,6 +1377,15 @@ class PGGraphStorage(BaseGraphStorage):
             node = record[0]
             node_dict = node["n"]["properties"]
 
+            # Process string result, parse it to JSON dictionary
+            if isinstance(node_dict, str):
+                try:
+                    import json
+
+                    node_dict = json.loads(node_dict)
+                except json.JSONDecodeError:
+                    logger.warning(f"Failed to parse node string: {node_dict}")
+
             return node_dict
         return None
 
@@ -1363,6 +1434,15 @@ class PGGraphStorage(BaseGraphStorage):
         if record and record[0] and record[0]["edge_properties"]:
             result = record[0]["edge_properties"]
 
+            # Process string result, parse it to JSON dictionary
+            if isinstance(result, str):
+                try:
+                    import json
+
+                    result = json.loads(result)
+                except json.JSONDecodeError:
+                    logger.warning(f"Failed to parse edge string: {result}")
+
             return result
 
     async def get_node_edges(self, source_node_id: str) -> list[tuple[str, str]] | None:
@@ -1374,9 +1454,9 @@ class PGGraphStorage(BaseGraphStorage):
 
         query = """SELECT * FROM cypher('%s', $$
                       MATCH (n:base {entity_id: "%s"})
-                      OPTIONAL MATCH (n)-[]-(connected)
-                      RETURN n, connected
-                    $$) AS (n agtype, connected agtype)""" % (
+                      OPTIONAL MATCH (n)-[]-(connected:base)
+                      RETURN n.entity_id AS source_id, connected.entity_id AS connected_id
+                    $$) AS (source_id text, connected_id text)""" % (
             self.graph_name,
             label,
         )
@@ -1384,20 +1464,11 @@ class PGGraphStorage(BaseGraphStorage):
         results = await self._query(query)
         edges = []
         for record in results:
-            source_node = record["n"] if record["n"] else None
-            connected_node = record["connected"] if record["connected"] else None
+            source_id = record["source_id"]
+            connected_id = record["connected_id"]
 
-            if (
-                source_node
-                and connected_node
-                and "properties" in source_node
-                and "properties" in connected_node
-            ):
-                source_label = source_node["properties"].get("entity_id")
-                target_label = connected_node["properties"].get("entity_id")
-
-                if source_label and target_label:
-                    edges.append((source_label, target_label))
+            if source_id and connected_id:
+                edges.append((source_id, connected_id))
 
         return edges
 
@@ -1580,6 +1651,18 @@ class PGGraphStorage(BaseGraphStorage):
         for result in results:
             if result["node_id"] and result["n"]:
                 node_dict = result["n"]["properties"]
+
+                # Process string result, parse it to JSON dictionary
+                if isinstance(node_dict, str):
+                    try:
+                        import json
+
+                        node_dict = json.loads(node_dict)
+                    except json.JSONDecodeError:
+                        logger.warning(
+                            f"Failed to parse node string in batch: {node_dict}"
+                        )
+
                 # Remove the 'base' label if present in a 'labels' property
                 if "labels" in node_dict:
                     node_dict["labels"] = [
@@ -1731,15 +1814,39 @@ class PGGraphStorage(BaseGraphStorage):
 
         for result in forward_results:
             if result["source"] and result["target"] and result["edge_properties"]:
-                edges_dict[(result["source"], result["target"])] = result[
-                    "edge_properties"
-                ]
+                edge_props = result["edge_properties"]
+
+                # Process string result, parse it to JSON dictionary
+                if isinstance(edge_props, str):
+                    try:
+                        import json
+
+                        edge_props = json.loads(edge_props)
+                    except json.JSONDecodeError:
+                        logger.warning(
+                            f"Failed to parse edge properties string: {edge_props}"
+                        )
+                        continue
+
+                edges_dict[(result["source"], result["target"])] = edge_props
 
         for result in backward_results:
             if result["source"] and result["target"] and result["edge_properties"]:
-                edges_dict[(result["source"], result["target"])] = result[
-                    "edge_properties"
-                ]
+                edge_props = result["edge_properties"]
+
+                # Process string result, parse it to JSON dictionary
+                if isinstance(edge_props, str):
+                    try:
+                        import json
+
+                        edge_props = json.loads(edge_props)
+                    except json.JSONDecodeError:
+                        logger.warning(
+                            f"Failed to parse edge properties string: {edge_props}"
+                        )
+                        continue
+
+                edges_dict[(result["source"], result["target"])] = edge_props
 
         return edges_dict
 
@@ -1879,103 +1986,159 @@ class PGGraphStorage(BaseGraphStorage):
         visited_node_ids.add(internal_id)
         result.nodes.append(start_node)
 
-        while queue and len(visited_node_ids) < max_nodes:
-            # Dequeue the next node to process from the front of the queue
-            current_node, current_depth = queue.popleft()
+        result.is_truncated = False
 
-            if current_depth >= max_depth:
+        # BFS search main loop
+        while queue:
+            # Get all nodes at the current depth
+            current_level_nodes = []
+            current_depth = None
+
+            # Determine current depth
+            if queue:
+                current_depth = queue[0][1]
+
+            # Extract all nodes at current depth from the queue
+            while queue and queue[0][1] == current_depth:
+                node, depth = queue.popleft()
+                if depth > max_depth:
+                    continue
+                current_level_nodes.append(node)
+
+            if not current_level_nodes:
                 continue
 
-            # Get all edges and target nodes for the current node - query outgoing and incoming edges separately for efficiency
-            current_entity_id = current_node.labels[0]
-            outgoing_query = """SELECT * FROM cypher('%s', $$
-                        MATCH (a:base {entity_id: "%s"})-[r]->(b)
-                        WITH r, b, id(r) as edge_id, id(b) as target_id
-                        RETURN r, b, edge_id, target_id
-                      $$) AS (r agtype, b agtype, edge_id bigint, target_id bigint)""" % (
-                self.graph_name,
-                current_entity_id,
-            )
-            incoming_query = """SELECT * FROM cypher('%s', $$
-                        MATCH (a:base {entity_id: "%s"})<-[r]-(b)
-                        WITH r, b, id(r) as edge_id, id(b) as target_id
-                        RETURN r, b, edge_id, target_id
-                      $$) AS (r agtype, b agtype, edge_id bigint, target_id bigint)""" % (
-                self.graph_name,
-                current_entity_id,
+            # Check depth limit
+            if current_depth > max_depth:
+                continue
+
+            # Prepare node IDs list
+            node_ids = [node.labels[0] for node in current_level_nodes]
+            formatted_ids = ", ".join(
+                [f'"{self._normalize_node_id(node_id)}"' for node_id in node_ids]
             )
 
-            outgoing_neighbors = await self._query(outgoing_query)
-            incoming_neighbors = await self._query(incoming_query)
-            neighbors = outgoing_neighbors + incoming_neighbors
+            # Construct batch query for outgoing edges
+            outgoing_query = f"""SELECT * FROM cypher('{self.graph_name}', $$
+                UNWIND [{formatted_ids}] AS node_id
+                MATCH (n:base {{entity_id: node_id}})
+                OPTIONAL MATCH (n)-[r]->(neighbor:base)
+                RETURN node_id AS current_id,
+                       id(n) AS current_internal_id,
+                       id(neighbor) AS neighbor_internal_id,
+                       neighbor.entity_id AS neighbor_id,
+                       id(r) AS edge_id,
+                       r,
+                       neighbor,
+                       true AS is_outgoing
+              $$) AS (current_id text, current_internal_id bigint, neighbor_internal_id bigint,
+                      neighbor_id text, edge_id bigint, r agtype, neighbor agtype, is_outgoing bool)"""
 
-            # logger.debug(f"Node {current_entity_id} has {len(neighbors)} neighbors (outgoing: {len(outgoing_neighbors)}, incoming: {len(incoming_neighbors)})")
+            # Construct batch query for incoming edges
+            incoming_query = f"""SELECT * FROM cypher('{self.graph_name}', $$
+                UNWIND [{formatted_ids}] AS node_id
+                MATCH (n:base {{entity_id: node_id}})
+                OPTIONAL MATCH (n)<-[r]-(neighbor:base)
+                RETURN node_id AS current_id,
+                       id(n) AS current_internal_id,
+                       id(neighbor) AS neighbor_internal_id,
+                       neighbor.entity_id AS neighbor_id,
+                       id(r) AS edge_id,
+                       r,
+                       neighbor,
+                       false AS is_outgoing
+              $$) AS (current_id text, current_internal_id bigint, neighbor_internal_id bigint,
+                      neighbor_id text, edge_id bigint, r agtype, neighbor agtype, is_outgoing bool)"""
 
+            # Execute queries
+            outgoing_results = await self._query(outgoing_query)
+            incoming_results = await self._query(incoming_query)
+
+            # Combine results
+            neighbors = outgoing_results + incoming_results
+
+            # Create mapping from node ID to node object
+            node_map = {node.labels[0]: node for node in current_level_nodes}
+
+            # Process all results in a single loop
             for record in neighbors:
-                if not record.get("b") or not record.get("r"):
+                if not record.get("neighbor") or not record.get("r"):
                     continue
 
-                b_node = record["b"]
+                # Get current node information
+                current_entity_id = record["current_id"]
+                current_node = node_map[current_entity_id]
+
+                # Get neighbor node information
+                neighbor_entity_id = record["neighbor_id"]
+                neighbor_internal_id = str(record["neighbor_internal_id"])
+                is_outgoing = record["is_outgoing"]
+
+                # Determine edge direction
+                if is_outgoing:
+                    source_id = current_node.id
+                    target_id = neighbor_internal_id
+                else:
+                    source_id = neighbor_internal_id
+                    target_id = current_node.id
+
+                if not neighbor_entity_id:
+                    continue
+
+                # Get edge and node information
+                b_node = record["neighbor"]
                 rel = record["r"]
                 edge_id = str(record["edge_id"])
 
-                if (
-                    "properties" not in b_node
-                    or "entity_id" not in b_node["properties"]
-                ):
-                    continue
-
-                target_entity_id = b_node["properties"]["entity_id"]
-                target_internal_id = str(b_node["id"])
-
-                # Create KnowledgeGraphNode for target
-                target_node = KnowledgeGraphNode(
-                    id=target_internal_id,
-                    labels=[target_entity_id],
+                # Create neighbor node object
+                neighbor_node = KnowledgeGraphNode(
+                    id=neighbor_internal_id,
+                    labels=[neighbor_entity_id],
                     properties=b_node["properties"],
                 )
+
+                # Sort entity_ids to ensure (A,B) and (B,A) are treated as the same edge
+                sorted_pair = tuple(sorted([current_entity_id, neighbor_entity_id]))
 
                 # Create edge object
                 edge = KnowledgeGraphEdge(
                     id=edge_id,
                     type=rel["label"],
-                    source=current_node.id,
-                    target=target_internal_id,
+                    source=source_id,
+                    target=target_id,
                     properties=rel["properties"],
                 )
 
-                # Sort entity_ids to ensure (A,B) and (B,A) are treated as the same edge
-                sorted_pair = tuple(sorted([current_entity_id, target_entity_id]))
+                if neighbor_internal_id in visited_node_ids:
+                    # Add backward edge if neighbor node is already visited
+                    if (
+                        edge_id not in visited_edges
+                        and sorted_pair not in visited_edge_pairs
+                    ):
+                        result.edges.append(edge)
+                        visited_edges.add(edge_id)
+                        visited_edge_pairs.add(sorted_pair)
+                else:
+                    if len(visited_node_ids) < max_nodes and current_depth < max_depth:
+                        # Add new node to result and queue
+                        result.nodes.append(neighbor_node)
+                        visited_nodes.add(neighbor_entity_id)
+                        visited_node_ids.add(neighbor_internal_id)
 
-                # Add edge (if not already added)
-                if (
-                    edge_id not in visited_edges
-                    and sorted_pair not in visited_edge_pairs
-                ):
-                    result.edges.append(edge)
-                    visited_edges.add(edge_id)
-                    visited_edge_pairs.add(sorted_pair)
+                        # Add node to queue with incremented depth
+                        queue.append((neighbor_node, current_depth + 1))
 
-                # If target node not yet visited, add to result and queue
-                if target_internal_id not in visited_node_ids:
-                    result.nodes.append(target_node)
-                    visited_nodes.add(target_entity_id)
-                    visited_node_ids.add(target_internal_id)
-
-                    # Add node to queue with incremented depth
-                    queue.append((target_node, current_depth + 1))
-
-                    # If node limit reached, set truncated flag and exit
-                    if len(visited_node_ids) >= max_nodes:
-                        result.is_truncated = True
-                        logger.info(
-                            f"Graph truncated: BFS limited to {max_nodes} nodes"
-                        )
-                        break
-
-            # If inner loop reached node limit and exited, also exit outer loop
-            if len(visited_node_ids) >= max_nodes:
-                break
+                        # Add forward edge
+                        if (
+                            edge_id not in visited_edges
+                            and sorted_pair not in visited_edge_pairs
+                        ):
+                            result.edges.append(edge)
+                            visited_edges.add(edge_id)
+                            visited_edge_pairs.add(sorted_pair)
+                    else:
+                        if current_depth < max_depth:
+                            result.is_truncated = True
 
         return result
 
@@ -1997,6 +2160,8 @@ class PGGraphStorage(BaseGraphStorage):
             KnowledgeGraph object containing nodes and edges, with an is_truncated flag
             indicating whether the graph was truncated due to max_nodes limit
         """
+        kg = KnowledgeGraph()
+
         # Handle wildcard query - get all nodes
         if node_label == "*":
             # First check total node count to determine if graph should be truncated
@@ -2009,57 +2174,91 @@ class PGGraphStorage(BaseGraphStorage):
             total_nodes = count_result[0]["total_nodes"] if count_result else 0
             is_truncated = total_nodes > max_nodes
 
-            # Get nodes and edges
-            query = f"""SELECT * FROM cypher('{self.graph_name}', $$
-                    MATCH (node:base)
-                    OPTIONAL MATCH (node)-[r]->()
-                    RETURN collect(distinct node) AS n, collect(distinct r) AS r
-                    LIMIT {max_nodes}
-                    $$) AS (n agtype, r agtype)"""
+            # Get max_nodes with highest degrees
+            query_nodes = f"""SELECT * FROM cypher('{self.graph_name}', $$
+                    MATCH (n:base)
+                    OPTIONAL MATCH (n)-[r]->()
+                    RETURN id(n) as node_id, count(r) as degree
+                $$) AS (node_id BIGINT, degree BIGINT)
+                ORDER BY degree DESC
+                LIMIT {max_nodes}"""
+            node_results = await self._query(query_nodes)
 
-            results = await self._query(query)
+            node_ids = [str(result["node_id"]) for result in node_results]
 
-            # Process query results, deduplicate nodes and edges
-            nodes_dict = {}
-            edges_dict = {}
+            logger.info(f"Total nodes: {total_nodes}, Selected nodes: {len(node_ids)}")
 
-            for result in results:
-                if result.get("n") and isinstance(result["n"], list):
-                    for node in result["n"]:
-                        if isinstance(node, dict) and "id" in node:
-                            node_id = str(node["id"])
-                            if node_id not in nodes_dict and "properties" in node:
-                                nodes_dict[node_id] = KnowledgeGraphNode(
-                                    id=node_id,
-                                    labels=[node["properties"]["entity_id"]],
-                                    properties=node["properties"],
-                                )
+            if node_ids:
+                formatted_ids = ", ".join(node_ids)
+                # Construct batch query for subgraph within max_nodes
+                query = f"""SELECT * FROM cypher('{self.graph_name}', $$
+                        WITH [{formatted_ids}] AS node_ids
+                        MATCH (a)
+                        WHERE id(a) IN node_ids
+                        OPTIONAL MATCH (a)-[r]->(b)
+                            WHERE id(b) IN node_ids
+                        RETURN a, r, b
+                    $$) AS (a AGTYPE, r AGTYPE, b AGTYPE)"""
+                results = await self._query(query)
 
-                if result.get("r") and isinstance(result["r"], list):
-                    for edge in result["r"]:
-                        if isinstance(edge, dict) and "id" in edge:
-                            edge_id = str(edge["id"])
-                            if edge_id not in edges_dict:
-                                edges_dict[edge_id] = KnowledgeGraphEdge(
-                                    id=edge_id,
-                                    type="DIRECTED",
-                                    source=str(edge["start_id"]),
-                                    target=str(edge["end_id"]),
-                                    properties=edge["properties"],
-                                )
+                # Process query results, deduplicate nodes and edges
+                nodes_dict = {}
+                edges_dict = {}
+                for result in results:
+                    # Process node a
+                    if result.get("a") and isinstance(result["a"], dict):
+                        node_a = result["a"]
+                        node_id = str(node_a["id"])
+                        if node_id not in nodes_dict and "properties" in node_a:
+                            nodes_dict[node_id] = KnowledgeGraphNode(
+                                id=node_id,
+                                labels=[node_a["properties"]["entity_id"]],
+                                properties=node_a["properties"],
+                            )
 
-            kg = KnowledgeGraph(
-                nodes=list(nodes_dict.values()),
-                edges=list(edges_dict.values()),
-                is_truncated=is_truncated,
+                    # Process node b
+                    if result.get("b") and isinstance(result["b"], dict):
+                        node_b = result["b"]
+                        node_id = str(node_b["id"])
+                        if node_id not in nodes_dict and "properties" in node_b:
+                            nodes_dict[node_id] = KnowledgeGraphNode(
+                                id=node_id,
+                                labels=[node_b["properties"]["entity_id"]],
+                                properties=node_b["properties"],
+                            )
+
+                    # Process edge r
+                    if result.get("r") and isinstance(result["r"], dict):
+                        edge = result["r"]
+                        edge_id = str(edge["id"])
+                        if edge_id not in edges_dict:
+                            edges_dict[edge_id] = KnowledgeGraphEdge(
+                                id=edge_id,
+                                type=edge["label"],
+                                source=str(edge["start_id"]),
+                                target=str(edge["end_id"]),
+                                properties=edge["properties"],
+                            )
+
+                kg = KnowledgeGraph(
+                    nodes=list(nodes_dict.values()),
+                    edges=list(edges_dict.values()),
+                    is_truncated=is_truncated,
+                )
+            else:
+                # For single node query, use BFS algorithm
+                kg = await self._bfs_subgraph(node_label, max_depth, max_nodes)
+
+            logger.info(
+                f"Subgraph query successful | Node count: {len(kg.nodes)} | Edge count: {len(kg.edges)}"
             )
         else:
-            # For single node query, use BFS algorithm
+            # For non-wildcard queries, use the BFS algorithm
             kg = await self._bfs_subgraph(node_label, max_depth, max_nodes)
+            logger.info(
+                f"Subgraph query for '{node_label}' successful | Node count: {len(kg.nodes)} | Edge count: {len(kg.edges)}"
+            )
 
-        logger.info(
-            f"Subgraph query successful | Node count: {len(kg.nodes)} | Edge count: {len(kg.edges)}"
-        )
         return kg
 
     async def drop(self) -> dict[str, str]:
@@ -2102,8 +2301,8 @@ TABLES = {
                     doc_name VARCHAR(1024),
                     content TEXT,
                     meta JSONB,
-                    create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    update_time TIMESTAMP,
+                    create_time TIMESTAMP(0),
+                    update_time TIMESTAMP(0),
 	                CONSTRAINT LIGHTRAG_DOC_FULL_PK PRIMARY KEY (workspace, id)
                     )"""
     },
@@ -2117,8 +2316,8 @@ TABLES = {
                     content TEXT,
                     content_vector VECTOR,
                     file_path VARCHAR(256),
-                    create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    update_time TIMESTAMP,
+                    create_time TIMESTAMP(0) WITH TIME ZONE,
+                    update_time TIMESTAMP(0) WITH TIME ZONE,
 	                CONSTRAINT LIGHTRAG_DOC_CHUNKS_PK PRIMARY KEY (workspace, id)
                     )"""
     },
@@ -2129,8 +2328,8 @@ TABLES = {
                     entity_name VARCHAR(255),
                     content TEXT,
                     content_vector VECTOR,
-                    create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    update_time TIMESTAMP,
+                    create_time TIMESTAMP(0) WITH TIME ZONE,
+                    update_time TIMESTAMP(0) WITH TIME ZONE,
                     chunk_ids VARCHAR(255)[] NULL,
                     file_path TEXT NULL,
 	                CONSTRAINT LIGHTRAG_VDB_ENTITY_PK PRIMARY KEY (workspace, id)
@@ -2144,8 +2343,8 @@ TABLES = {
                     target_id VARCHAR(256),
                     content TEXT,
                     content_vector VECTOR,
-                    create_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    update_time TIMESTAMP,
+                    create_time TIMESTAMP(0) WITH TIME ZONE,
+                    update_time TIMESTAMP(0) WITH TIME ZONE,
                     chunk_ids VARCHAR(255)[] NULL,
                     file_path TEXT NULL,
 	                CONSTRAINT LIGHTRAG_VDB_RELATION_PK PRIMARY KEY (workspace, id)
@@ -2173,8 +2372,8 @@ TABLES = {
 	               chunks_count int4 NULL,
 	               status varchar(64) NULL,
 	               file_path TEXT NULL,
-	               created_at timestamp DEFAULT CURRENT_TIMESTAMP NULL,
-	               updated_at timestamp DEFAULT CURRENT_TIMESTAMP NULL,
+	               created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NULL,
+	               updated_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP NULL,
 	               CONSTRAINT LIGHTRAG_DOC_STATUS_PK PRIMARY KEY (workspace, id)
 	              )"""
     },
@@ -2221,8 +2420,9 @@ SQL_TEMPLATES = {
                                       update_time = CURRENT_TIMESTAMP
                                      """,
     "upsert_chunk": """INSERT INTO LIGHTRAG_DOC_CHUNKS (workspace, id, tokens,
-                      chunk_order_index, full_doc_id, content, content_vector, file_path)
-                      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                      chunk_order_index, full_doc_id, content, content_vector, file_path,
+                      create_time, update_time)
+                      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
                       ON CONFLICT (workspace,id) DO UPDATE
                       SET tokens=EXCLUDED.tokens,
                       chunk_order_index=EXCLUDED.chunk_order_index,
@@ -2230,23 +2430,23 @@ SQL_TEMPLATES = {
                       content = EXCLUDED.content,
                       content_vector=EXCLUDED.content_vector,
                       file_path=EXCLUDED.file_path,
-                      update_time = CURRENT_TIMESTAMP
+                      update_time = EXCLUDED.update_time
                      """,
     # SQL for VectorStorage
     "upsert_entity": """INSERT INTO LIGHTRAG_VDB_ENTITY (workspace, id, entity_name, content,
-                      content_vector, chunk_ids, file_path)
-                      VALUES ($1, $2, $3, $4, $5, $6::varchar[], $7)
+                      content_vector, chunk_ids, file_path, create_time, update_time)
+                      VALUES ($1, $2, $3, $4, $5, $6::varchar[], $7, $8, $9)
                       ON CONFLICT (workspace,id) DO UPDATE
                       SET entity_name=EXCLUDED.entity_name,
                       content=EXCLUDED.content,
                       content_vector=EXCLUDED.content_vector,
                       chunk_ids=EXCLUDED.chunk_ids,
                       file_path=EXCLUDED.file_path,
-                      update_time=CURRENT_TIMESTAMP
+                      update_time=EXCLUDED.update_time
                      """,
     "upsert_relationship": """INSERT INTO LIGHTRAG_VDB_RELATION (workspace, id, source_id,
-                      target_id, content, content_vector, chunk_ids, file_path)
-                      VALUES ($1, $2, $3, $4, $5, $6, $7::varchar[], $8)
+                      target_id, content, content_vector, chunk_ids, file_path, create_time, update_time)
+                      VALUES ($1, $2, $3, $4, $5, $6, $7::varchar[], $8, $9, $10)
                       ON CONFLICT (workspace,id) DO UPDATE
                       SET source_id=EXCLUDED.source_id,
                       target_id=EXCLUDED.target_id,
@@ -2254,7 +2454,7 @@ SQL_TEMPLATES = {
                       content_vector=EXCLUDED.content_vector,
                       chunk_ids=EXCLUDED.chunk_ids,
                       file_path=EXCLUDED.file_path,
-                      update_time = CURRENT_TIMESTAMP
+                      update_time = EXCLUDED.update_time
                      """,
     "relationships": """
     WITH relevant_chunks AS (
@@ -2262,9 +2462,9 @@ SQL_TEMPLATES = {
         FROM LIGHTRAG_DOC_CHUNKS
         WHERE $2::varchar[] IS NULL OR full_doc_id = ANY($2::varchar[])
     )
-    SELECT source_id as src_id, target_id as tgt_id
+    SELECT source_id as src_id, target_id as tgt_id, EXTRACT(EPOCH FROM create_time)::BIGINT as created_at
     FROM (
-        SELECT r.id, r.source_id, r.target_id, 1 - (r.content_vector <=> '[{embedding_string}]'::vector) as distance
+        SELECT r.id, r.source_id, r.target_id, r.create_time, 1 - (r.content_vector <=> '[{embedding_string}]'::vector) as distance
         FROM LIGHTRAG_VDB_RELATION r
         JOIN relevant_chunks c ON c.chunk_id = ANY(r.chunk_ids)
         WHERE r.workspace=$1
@@ -2279,9 +2479,9 @@ SQL_TEMPLATES = {
             FROM LIGHTRAG_DOC_CHUNKS
             WHERE $2::varchar[] IS NULL OR full_doc_id = ANY($2::varchar[])
         )
-        SELECT entity_name FROM
+        SELECT entity_name, EXTRACT(EPOCH FROM create_time)::BIGINT as created_at FROM
             (
-                SELECT e.id, e.entity_name, 1 - (e.content_vector <=> '[{embedding_string}]'::vector) as distance
+                SELECT e.id, e.entity_name, e.create_time, 1 - (e.content_vector <=> '[{embedding_string}]'::vector) as distance
                 FROM LIGHTRAG_VDB_ENTITY e
                 JOIN relevant_chunks c ON c.chunk_id = ANY(e.chunk_ids)
                 WHERE e.workspace=$1
@@ -2296,9 +2496,9 @@ SQL_TEMPLATES = {
             FROM LIGHTRAG_DOC_CHUNKS
             WHERE $2::varchar[] IS NULL OR full_doc_id = ANY($2::varchar[])
         )
-        SELECT id, content, file_path FROM
+        SELECT id, content, file_path, EXTRACT(EPOCH FROM create_time)::BIGINT as created_at FROM
             (
-                SELECT id, content, file_path, 1 - (content_vector <=> '[{embedding_string}]'::vector) as distance
+                SELECT id, content, file_path, create_time, 1 - (content_vector <=> '[{embedding_string}]'::vector) as distance
                 FROM LIGHTRAG_DOC_CHUNKS
                 WHERE workspace=$1
                 AND id IN (SELECT chunk_id FROM relevant_chunks)

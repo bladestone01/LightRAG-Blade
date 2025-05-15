@@ -79,7 +79,7 @@ class JsonKVStorage(BaseKVStorage):
                     # For non-cache namespaces, use the original count method
                     data_count = len(data_dict)
 
-                logger.info(
+                logger.debug(
                     f"Process {os.getpid()} KV writting {data_count} records to {self.namespace}"
                 )
                 write_json(data_dict, self._file_name)
@@ -197,3 +197,10 @@ class JsonKVStorage(BaseKVStorage):
         except Exception as e:
             logger.error(f"Error dropping {self.namespace}: {e}")
             return {"status": "error", "message": str(e)}
+
+    async def finalize(self):
+        """Finalize storage resources
+        Persistence cache data to disk before exiting
+        """
+        if self.namespace.endswith("cache"):
+            await self.index_done_callback()

@@ -2,7 +2,7 @@ import Input from '@/components/ui/Input'
 import Button from '@/components/ui/Button'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { throttle } from '@/lib/utils'
-import { queryText, queryTextStream, Message } from '@/api/lightrag'
+import { queryText, queryTextStream } from '@/api/lightrag'
 import { errorMessage } from '@/lib/utils'
 import { useSettingsStore } from '@/stores/settings'
 import { useDebounce } from '@/hooks/useDebounce'
@@ -12,11 +12,47 @@ import { EraserIcon, SendIcon } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import type { QueryMode } from '@/api/lightrag'
 
+// Helper function to generate unique IDs with browser compatibility
+const generateUniqueId = () => {
+  // Use crypto.randomUUID() if available
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  // Fallback to timestamp + random string for browsers without crypto.randomUUID
+  return `id-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+};
+
 export default function RetrievalTesting() {
   const { t } = useTranslation()
-  const [messages, setMessages] = useState<MessageWithError[]>(
-    () => useSettingsStore.getState().retrievalHistory || []
-  )
+  const [messages, setMessages] = useState<MessageWithError[]>(() => {
+    try {
+      const history = useSettingsStore.getState().retrievalHistory || []
+      // Ensure each message from history has a unique ID and mermaidRendered status
+      return history.map((msg, index) => {
+        try {
+          const msgWithError = msg as MessageWithError // Cast to access potential properties
+          return {
+            ...msg,
+            id: msgWithError.id || `hist-${Date.now()}-${index}`, // Add ID if missing
+            mermaidRendered: msgWithError.mermaidRendered ?? true // Assume historical mermaid is rendered
+          }
+        } catch (error) {
+          console.error('Error processing message:', error)
+          // Return a default message if there's an error
+          return {
+            role: 'system',
+            content: 'Error loading message',
+            id: `error-${Date.now()}-${index}`,
+            isError: true,
+            mermaidRendered: true
+          }
+        }
+      })
+    } catch (error) {
+      console.error('Error loading history:', error)
+      return [] // Return an empty array if there's an error
+    }
+  })
   const [inputValue, setInputValue] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [inputError, setInputError] = useState('') // Error message for input
@@ -81,14 +117,17 @@ export default function RetrievalTesting() {
 
       // Create messages
       // Save the original input (with prefix if any) in userMessage.content for display
-      const userMessage: Message = {
+      const userMessage: MessageWithError = {
+        id: generateUniqueId(), // Use browser-compatible ID generation
         content: inputValue,
         role: 'user'
       }
 
-      const assistantMessage: Message = {
+      const assistantMessage: MessageWithError = {
+        id: generateUniqueId(), // Use browser-compatible ID generation
         content: '',
-        role: 'assistant'
+        role: 'assistant',
+        mermaidRendered: false
       }
 
       const prevMessages = [...messages]
@@ -113,12 +152,28 @@ export default function RetrievalTesting() {
       // Create a function to update the assistant's message
       const updateAssistantMessage = (chunk: string, isError?: boolean) => {
         assistantMessage.content += chunk
+
+        // Detect if the assistant message contains a complete mermaid code block
+        // Simple heuristic: look for ```mermaid ... ```
+        const mermaidBlockRegex = /```mermaid\s+([\s\S]+?)```/g
+        let mermaidRendered = false
+        let match
+        while ((match = mermaidBlockRegex.exec(assistantMessage.content)) !== null) {
+          // If the block is not too short, consider it complete
+          if (match[1] && match[1].trim().length > 10) {
+            mermaidRendered = true
+            break
+          }
+        }
+        assistantMessage.mermaidRendered = mermaidRendered
+
         setMessages((prev) => {
           const newMessages = [...prev]
           const lastMessage = newMessages[newMessages.length - 1]
           if (lastMessage.role === 'assistant') {
             lastMessage.content = assistantMessage.content
             lastMessage.isError = isError
+            lastMessage.mermaidRendered = assistantMessage.mermaidRendered
           }
           return newMessages
         })
@@ -279,14 +334,17 @@ export default function RetrievalTesting() {
                   {t('retrievePanel.retrieval.startPrompt')}
                 </div>
               ) : (
-                messages.map((message, idx) => (
-                  <div
-                    key={idx}
-                    className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
-                  >
-                    {<ChatMessage message={message} />}
-                  </div>
-                ))
+                messages.map((message) => { // Remove unused idx
+                  // isComplete logic is now handled internally based on message.mermaidRendered
+                  return (
+                    <div
+                      key={message.id} // Use stable ID for key
+                      className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
+                    >
+                      {<ChatMessage message={message} />}
+                    </div>
+                  );
+                })
               )}
               <div ref={messagesEndRef} className="pb-1" />
             </div>

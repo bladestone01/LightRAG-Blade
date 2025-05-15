@@ -6,7 +6,7 @@ import configparser
 import os
 import warnings
 from dataclasses import asdict, dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from functools import partial
 from typing import (
     Any,
@@ -20,6 +20,11 @@ from typing import (
     List,
     Dict,
 )
+from lightrag.constants import (
+    DEFAULT_MAX_TOKEN_SUMMARY,
+    DEFAULT_FORCE_LLM_SUMMARY_ON_MERGE,
+)
+from lightrag.utils import get_env_value
 
 from lightrag.kg import (
     STORAGES,
@@ -46,12 +51,12 @@ from .namespace import NameSpace, make_namespace
 from .operate import (
     chunking_by_token_size,
     extract_entities,
+    merge_nodes_and_edges,
     kg_query,
-    mix_kg_vector_query,
     naive_query,
     query_with_keywords,
 )
-from .prompt import GRAPH_FIELD_SEP, PROMPTS
+from .prompt import GRAPH_FIELD_SEP
 from .utils import (
     Tokenizer,
     TiktokenTokenizer,
@@ -60,7 +65,7 @@ from .utils import (
     compute_mdhash_id,
     convert_response_to_json,
     lazy_external_import,
-    limit_async_func_call,
+    priority_limit_async_func_call,
     get_content_summary,
     clean_text,
     check_storage_env_vars,
@@ -118,11 +123,15 @@ class LightRAG:
     entity_extract_max_gleaning: int = field(default=1)
     """Maximum number of entity extraction attempts for ambiguous content."""
 
-    summary_to_max_tokens: int = field(default=int(os.getenv("MAX_TOKEN_SUMMARY", 500)))
+    summary_to_max_tokens: int = field(
+        default=get_env_value("MAX_TOKEN_SUMMARY", DEFAULT_MAX_TOKEN_SUMMARY, int)
+    )
     """设置摘要的最大token数"""
 
     force_llm_summary_on_merge: int = field(
-        default=int(os.getenv("FORCE_LLM_SUMMARY_ON_MERGE", 6))
+        default=get_env_value(
+            "FORCE_LLM_SUMMARY_ON_MERGE", DEFAULT_FORCE_LLM_SUMMARY_ON_MERGE, int
+        )
     )
 
     # Text chunking
@@ -245,7 +254,7 @@ class LightRAG:
 
     addon_params: dict[str, Any] = field(
         default_factory=lambda: {
-            "language": os.getenv("SUMMARY_LANGUAGE", PROMPTS["DEFAULT_LANGUAGE"])
+            "language": get_env_value("SUMMARY_LANGUAGE", "English", str)
         }
     )
 
@@ -338,9 +347,9 @@ class LightRAG:
         logger.debug(f"LightRAG init with param:\n  {_print_config}\n")
 
         # Init Embedding
-        self.embedding_func = limit_async_func_call(self.embedding_func_max_async)(  # type: ignore
-            self.embedding_func
-        )
+        self.embedding_func = priority_limit_async_func_call(
+            self.embedding_func_max_async
+        )(self.embedding_func)
 
         # Initialize all storages
         self.key_string_value_json_storage_cls: type[BaseKVStorage] = (
@@ -381,6 +390,8 @@ class LightRAG:
             ),
             embedding_func=self.embedding_func,
         )
+
+        # TODO: deprecating, text_chunks is redundant with chunks_vdb
         self.text_chunks: BaseKVStorage = self.key_string_value_json_storage_cls(  # type: ignore
             namespace=make_namespace(
                 self.namespace_prefix, NameSpace.KV_STORE_TEXT_CHUNKS
@@ -426,7 +437,7 @@ class LightRAG:
         # Directly use llm_response_cache, don't create a new object
         hashing_kv = self.llm_response_cache
 
-        self.llm_model_func = limit_async_func_call(self.llm_model_max_async)(
+        self.llm_model_func = priority_limit_async_func_call(self.llm_model_max_async)(
             partial(
                 self.llm_model_func,  # type: ignore
                 hashing_kv=hashing_kv,
@@ -756,8 +767,8 @@ class LightRAG:
                 "content": content_data["content"],
                 "content_summary": get_content_summary(content_data["content"]),
                 "content_length": len(content_data["content"]),
-                "created_at": datetime.now().isoformat(),
-                "updated_at": datetime.now().isoformat(),
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "updated_at": datetime.now(timezone.utc).isoformat(),
                 "file_path": content_data[
                     "file_path"
                 ],  # Store file path in document status
@@ -840,7 +851,7 @@ class LightRAG:
                     {
                         "busy": True,
                         "job_name": "Default Job",
-                        "job_start": datetime.now().isoformat(),
+                        "job_start": datetime.now(timezone.utc).isoformat(),
                         "docs": 0,
                         "batchs": 0,  # Total number of files to be processed
                         "cur_batch": 0,  # Number of files already processed
@@ -903,6 +914,7 @@ class LightRAG:
                     semaphore: asyncio.Semaphore,
                 ) -> None:
                     """Process single document"""
+                    file_extraction_stage_ok = False
                     async with semaphore:
                         nonlocal processed_count
                         current_file_number = 0
@@ -920,7 +932,7 @@ class LightRAG:
                                 )
                                 pipeline_status["cur_batch"] = processed_count
 
-                                log_message = f"Processing file ({current_file_number}/{total_files}): {file_path}"
+                                log_message = f"Extracting stage {current_file_number}/{total_files}: {file_path}"
                                 logger.info(log_message)
                                 pipeline_status["history_messages"].append(log_message)
                                 log_message = f"Processing d-id: {doc_id}"
@@ -957,7 +969,9 @@ class LightRAG:
                                             "content_summary": status_doc.content_summary,
                                             "content_length": status_doc.content_length,
                                             "created_at": status_doc.created_at,
-                                            "updated_at": datetime.now().isoformat(),
+                                            "updated_at": datetime.now(
+                                                timezone.utc
+                                            ).isoformat(),
                                             "file_path": file_path,
                                         }
                                     }
@@ -987,6 +1001,72 @@ class LightRAG:
                                 text_chunks_task,
                             ]
                             await asyncio.gather(*tasks)
+                            file_extraction_stage_ok = True
+
+                        except Exception as e:
+                            # Log error and update pipeline status
+                            logger.error(traceback.format_exc())
+                            error_msg = f"Failed to extrat document {current_file_number}/{total_files}: {file_path}"
+                            logger.error(error_msg)
+                            async with pipeline_status_lock:
+                                pipeline_status["latest_message"] = error_msg
+                                pipeline_status["history_messages"].append(
+                                    traceback.format_exc()
+                                )
+                                pipeline_status["history_messages"].append(error_msg)
+
+                                # Cancel other tasks as they are no longer meaningful
+                                for task in [
+                                    chunks_vdb_task,
+                                    entity_relation_task,
+                                    full_docs_task,
+                                    text_chunks_task,
+                                ]:
+                                    if not task.done():
+                                        task.cancel()
+
+                            # Persistent llm cache
+                            if self.llm_response_cache:
+                                await self.llm_response_cache.index_done_callback()
+
+                            # Update document status to failed
+                            await self.doc_status.upsert(
+                                {
+                                    doc_id: {
+                                        "status": DocStatus.FAILED,
+                                        "error": str(e),
+                                        "content": status_doc.content,
+                                        "content_summary": status_doc.content_summary,
+                                        "content_length": status_doc.content_length,
+                                        "created_at": status_doc.created_at,
+                                        "updated_at": datetime.now(
+                                            timezone.utc
+                                        ).isoformat(),
+                                        "file_path": file_path,
+                                    }
+                                }
+                            )
+
+                    # Semphore released, concurrency controlled by graph_db_lock in merge_nodes_and_edges instead
+
+                    if file_extraction_stage_ok:
+                        try:
+                            # Get chunk_results from entity_relation_task
+                            chunk_results = await entity_relation_task
+                            await merge_nodes_and_edges(
+                                chunk_results=chunk_results,  # result collected from entity_relation_task
+                                knowledge_graph_inst=self.chunk_entity_relation_graph,
+                                entity_vdb=self.entities_vdb,
+                                relationships_vdb=self.relationships_vdb,
+                                global_config=asdict(self),
+                                pipeline_status=pipeline_status,
+                                pipeline_status_lock=pipeline_status_lock,
+                                llm_response_cache=self.llm_response_cache,
+                                current_file_number=current_file_number,
+                                total_files=total_files,
+                                file_path=file_path,
+                            )
+
                             await self.doc_status.upsert(
                                 {
                                     doc_id: {
@@ -996,7 +1076,9 @@ class LightRAG:
                                         "content_summary": status_doc.content_summary,
                                         "content_length": status_doc.content_length,
                                         "created_at": status_doc.created_at,
-                                        "updated_at": datetime.now().isoformat(),
+                                        "updated_at": datetime.now(
+                                            timezone.utc
+                                        ).isoformat(),
                                         "file_path": file_path,
                                     }
                                 }
@@ -1013,22 +1095,20 @@ class LightRAG:
 
                         except Exception as e:
                             # Log error and update pipeline status
-                            error_msg = f"Failed to process document {doc_id}: {traceback.format_exc()}"
-
+                            logger.error(traceback.format_exc())
+                            error_msg = f"Merging stage failed in document {current_file_number}/{total_files}: {file_path}"
                             logger.error(error_msg)
                             async with pipeline_status_lock:
                                 pipeline_status["latest_message"] = error_msg
+                                pipeline_status["history_messages"].append(
+                                    traceback.format_exc()
+                                )
                                 pipeline_status["history_messages"].append(error_msg)
 
-                                # Cancel other tasks as they are no longer meaningful
-                                for task in [
-                                    chunks_vdb_task,
-                                    entity_relation_task,
-                                    full_docs_task,
-                                    text_chunks_task,
-                                ]:
-                                    if not task.done():
-                                        task.cancel()
+                            # Persistent llm cache
+                            if self.llm_response_cache:
+                                await self.llm_response_cache.index_done_callback()
+
                             # Update document status to failed
                             await self.doc_status.upsert(
                                 {
@@ -1102,18 +1182,16 @@ class LightRAG:
 
     async def _process_entity_relation_graph(
         self, chunk: dict[str, Any], pipeline_status=None, pipeline_status_lock=None
-    ) -> None:
+    ) -> list:
         try:
-            await extract_entities(
+            chunk_results = await extract_entities(
                 chunk,
-                knowledge_graph_inst=self.chunk_entity_relation_graph,
-                entity_vdb=self.entities_vdb,
-                relationships_vdb=self.relationships_vdb,
                 global_config=asdict(self),
                 pipeline_status=pipeline_status,
                 pipeline_status_lock=pipeline_status_lock,
                 llm_response_cache=self.llm_response_cache,
             )
+            return chunk_results
         except Exception as e:
             error_msg = f"Failed to extract entities and relationships: {str(e)}"
             logger.error(error_msg)
@@ -1359,8 +1437,10 @@ class LightRAG:
         """
         # If a custom model is provided in param, temporarily update global config
         global_config = asdict(self)
+        # Save original query for vector search
+        param.original_query = query
 
-        if param.mode in ["local", "global", "hybrid"]:
+        if param.mode in ["local", "global", "hybrid", "mix"]:
             response = await kg_query(
                 query.strip(),
                 self.chunk_entity_relation_graph,
@@ -1369,35 +1449,25 @@ class LightRAG:
                 self.text_chunks,
                 param,
                 global_config,
-                hashing_kv=self.llm_response_cache,  # Directly use llm_response_cache
+                hashing_kv=self.llm_response_cache,
                 system_prompt=system_prompt,
+                chunks_vdb=self.chunks_vdb,
             )
         elif param.mode == "naive":
             response = await naive_query(
                 query.strip(),
                 self.chunks_vdb,
-                self.text_chunks,
                 param,
                 global_config,
-                hashing_kv=self.llm_response_cache,  # Directly use llm_response_cache
-                system_prompt=system_prompt,
-            )
-        elif param.mode == "mix":
-            response = await mix_kg_vector_query(
-                query.strip(),
-                self.chunk_entity_relation_graph,
-                self.entities_vdb,
-                self.relationships_vdb,
-                self.chunks_vdb,
-                self.text_chunks,
-                param,
-                global_config,
-                hashing_kv=self.llm_response_cache,  # Directly use llm_response_cache
+                hashing_kv=self.llm_response_cache,
                 system_prompt=system_prompt,
             )
         elif param.mode == "bypass":
             # Bypass mode: directly use LLM without knowledge retrieval
             use_llm_func = param.model_func or global_config["llm_model_func"]
+            # Apply higher priority (8) to entity/relation summary tasks
+            use_llm_func = partial(use_llm_func, _priority=8)
+
             param.stream = True if param.stream is None else param.stream
             response = await use_llm_func(
                 query.strip(),
@@ -1410,6 +1480,7 @@ class LightRAG:
         await self._query_done()
         return response
 
+    # TODO: Deprecated, use user_prompt in QueryParam instead
     def query_with_separate_keyword_extraction(
         self, query: str, prompt: str, param: QueryParam = QueryParam()
     ):
@@ -1431,6 +1502,7 @@ class LightRAG:
             self.aquery_with_separate_keyword_extraction(query, prompt, param)
         )
 
+    # TODO: Deprecated, use user_prompt in QueryParam instead
     async def aquery_with_separate_keyword_extraction(
         self, query: str, prompt: str, param: QueryParam = QueryParam()
     ) -> str | AsyncIterator[str]:

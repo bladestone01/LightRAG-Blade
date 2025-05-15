@@ -12,6 +12,8 @@ PROMPTS["DEFAULT_COMPLETION_DELIMITER"] = "<|COMPLETE|>"
 
 PROMPTS["DEFAULT_ENTITY_TYPES"] = ["机构", "人员", "检测方法", "标准类型", "具体标准名称", "标准编码", "名称", "分类", "规范要求"]
 
+PROMPTS["DEFAULT_USER_PROMPT"] = "n/a"
+
 PROMPTS["entity_extraction"] = """
 - Role: 知识图谱构建专家和生物安全与食品安全国家标准分析师
 - Background: 用户希望通过从生物安全和食品安全国家标准文件中提取知识图谱的三元组，挖掘国标发布的规律，从而更好地理解标准中的关键信息和逻辑关系，为相关领域的研究和实践提供支持。
@@ -316,9 +318,13 @@ PROMPTS["naive_rag_response"] = """---角色---
 - 确保回答与对话历史保持连贯性
 - 在"参考文献"章节末尾列出最多5个重要参考来源。需明确标注每个来源是来自知识图谱(KG)还是向量数据(DC)，并包含文件路径（如有），格式如下：[KG/DC] 来源内容 (File: file_path)
 - 如不知道答案，请直接说明
-- 请勿编造信息。不要包含知识库未提供的内容"""
+- 请勿编造信息。不要包含知识库未提供的内容
+- 额外的用户提示词:{user_prompt}
+
+响应结果:"""
 
 
+# TODO: deprecated
 PROMPTS[
     "similarity_check"
 ] = """请分析以下两个问题的相似度:
