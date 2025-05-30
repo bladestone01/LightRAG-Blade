@@ -534,6 +534,8 @@ class PGKVStorage(BaseKVStorage):
         except Exception as e:
             logger.error(f"Error while deleting records from {self.namespace}: {e}")
 
+
+
     async def drop_cache_by_modes(self, modes: list[str] | None = None) -> bool:
         """Delete specific records from storage by cache mode
 
@@ -768,10 +770,41 @@ class PGVectorStorage(BaseVectorStorage):
         except Exception as e:
             logger.error(f"Error while deleting vectors from {self.namespace}: {e}")
 
+    async def delete_by_chunkids(self, delete_chunk_ids: list[str]) -> None:
+        """Delete specific records from storage by their IDs
+
+        Args:
+            ids (list[str]): List of document IDs to be deleted from storage
+
+        Returns:
+            None
+        """
+        if not delete_chunk_ids or len(delete_chunk_ids) == 0:
+            logger.info(f"No chunk ids to delete in postgresql vector db")
+            return
+
+        table_name = namespace_to_table_name(self.namespace)
+        if not table_name:
+            logger.error(f"Unknown namespace for deletion: {self.namespace}")
+            return
+
+        update_sql = f"UPDATE {table_name} SET chunk_ids = ( SELECT ARRAY_AGG(elem) FROM UNNEST(chunk_ids1) AS elem WHERE elem <> ALL($1)) WHERE chunk_ids && ($2) AND array_length(chunk_ids, 1) >= 2"
+        # 处理数组长度=1的记录（删除整行）
+        delete_sql = f"DELETE FROM {table_name} WHERE chunk_ids && ($1) AND array_length(chunk_ids , 1) = 1 "
+
+        try:
+            await self.db.execute( update_sql, {"workspace": self.db.workspace, "delete_chunk_ids": delete_chunk_ids} )
+            await self.db.execute( delete_sql, {"workspace": self.db.workspace, "delete_chunk_ids": delete_chunk_ids} )
+            logger.debug(
+                f"Successfully deleted {len(delete_chunk_ids)} records from {self.namespace}"
+            )
+        except Exception as e:
+            logger.error(f"Error while deleting records from {self.namespace}: {e}")
+
     async def delete_entity(self, entity_name: str) -> None:
         """Delete an entity by its name from the vector storage.
 
-        Args:
+        delete_by_chunkidsArgs:
             entity_name: The name of the entity to delete
         """
         try:

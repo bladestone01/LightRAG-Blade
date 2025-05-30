@@ -222,6 +222,11 @@ class BaseVectorStorage(StorageNameSpace, ABC):
             ids: List of vector IDs to be deleted
         """
 
+    async def delete_by_chunk_ids(self, chunk_ids: list[str]) -> None:
+        """Delete vectors with specified chunk_ids
+        """
+        pass
+
 
 @dataclass
 class BaseKVStorage(StorageNameSpace, ABC):
@@ -262,6 +267,7 @@ class BaseKVStorage(StorageNameSpace, ABC):
         Returns:
             None
         """
+
 
     async def drop_cache_by_modes(self, modes: list[str] | None = None) -> bool:
         """Delete specific records from storage by cache mode

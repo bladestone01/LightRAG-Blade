@@ -1681,49 +1681,19 @@ class LightRAG:
 
             # 2. Get all chunks related to this document
             # Find all chunks where full_doc_id equals the current doc_id
-            all_chunks = await self.text_chunks.get_all()
-            related_chunks = {
-                chunk_id: chunk_data
-                for chunk_id, chunk_data in all_chunks.items()
-                if isinstance(chunk_data, dict)
-                and chunk_data.get("full_doc_id") == doc_id
-            }
+            all_chunks = await self.text_chunks.get_by_id("doc_id:"+ doc_id)
 
-            if not related_chunks:
+            if not all_chunks or len(all_chunks) == 0:
                 logger.warning(f"No chunks found for document {doc_id}")
                 return
 
             # Get all related chunk IDs
-            chunk_ids = set(related_chunks.keys())
+            chunk_ids = set(all_chunks)
             logger.debug(f"Found {len(chunk_ids)} chunks to delete")
-
-            # TODO: self.entities_vdb.client_storage only works for local storage, need to fix this
-
-            # 3. Before deleting, check the related entities and relationships for these chunks
-            # for chunk_id in chunk_ids:
-            #     # Check entities
-            #     entities_storage = await self.entities_vdb.client_storage
-            #     entities = [
-            #         dp
-            #         for dp in entities_storage["data"]
-            #         if chunk_id in dp.get("source_id")
-            #     ]
-            #     logger.debug(f"Chunk {chunk_id} has {len(entities)} related entities")
-            #
-            #     # Check relationships
-            #     relationships_storage = await self.relationships_vdb.client_storage
-            #     relations = [
-            #         dp
-            #         for dp in relationships_storage["data"]
-            #         if chunk_id in dp.get("source_id")
-            #     ]
-            #     logger.debug(f"Chunk {chunk_id} has {len(relations)} related relations")
-
-            # Continue with the original deletion process...
 
             # 4. Delete chunks from vector database
             if chunk_ids:
-                await self.chunks_vdb.delete(chunk_ids)
+                await self.chunks_vdb.delete_by_chunk_ids(chunk_ids)
                 await self.text_chunks.delete(chunk_ids)
 
             # 5. Find and process entities and relationships that have these chunks as source
@@ -1896,25 +1866,19 @@ class LightRAG:
                     logger.warning(f"Document {doc_id} still exists in full_docs")
 
                 # Verify if chunks have been deleted
-                all_remaining_chunks = await self.text_chunks.get_all()
-                remaining_related_chunks = {
-                    chunk_id: chunk_data
-                    for chunk_id, chunk_data in all_remaining_chunks.items()
-                    if isinstance(chunk_data, dict)
-                    and chunk_data.get("full_doc_id") == doc_id
-                }
-
+                remaining_related_chunks = await self.text_chunks.get_by_id("doc_id:"+ doc_id)
                 if remaining_related_chunks:
                     logger.warning(
                         f"Found {len(remaining_related_chunks)} remaining chunks"
                     )
 
                 # Verify entities and relationships
-                for chunk_id in chunk_ids:
-                    await process_data("entities", self.entities_vdb, chunk_id)
-                    await process_data(
-                        "relationships", self.relationships_vdb, chunk_id
-                    )
+                # FaissVectorStorageDB, NanoVectorStorageDB
+                # for chunk_id in chunk_ids:
+                #     await process_data("entities", self.entities_vdb, chunk_id)
+                #     await process_data(
+                #         "relationships", self.relationships_vdb, chunk_id
+                #     )
 
             await verify_deletion()
 

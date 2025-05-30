@@ -60,6 +60,20 @@ class RedisKVStorage(BaseKVStorage):
             f"Initialized Redis connection pool for {self.namespace} with max {MAX_CONNECTIONS} connections"
         )
 
+    async def _reset_connection(self):
+        """重置Redis连接池"""
+        logger.warning("Resetting Redis connection pool...")
+        try:
+            # 关闭旧连接池
+            await self._pool.disconnect()
+        except Exception as e:
+            logger.error(f"Error disconnecting old pool: {e}")
+
+        # 创建新连接池
+        self._pool = self._create_connection_pool()
+        self._redis = Redis(connection_pool=self._pool)
+        logger.info("Redis connection pool reset successfully")
+
     @asynccontextmanager
     async def _get_redis_connection(self):
         """安全上下文管理器，带自动重连机制"""
@@ -202,6 +216,32 @@ class RedisKVStorage(BaseKVStorage):
 
                 for k in data:
                     data[k]["_id"] = k
+
+                # 添加基于full_doc_id的反向索引，
+                # text_chunk:doc_id:{full_doc_id} => Set of keys (e.g., text_chunk:1, text_chunk:2)
+                # 在redis中, 保存一个set
+                # 构建 full_doc_id 到 chunk_id 的映射
+                doc_id_to_chunk_ids: dict[str, list[str]] = {}
+                for k in data:
+                    if "full_doc_id" in data[k]:
+                        full_doc_id = data[k]["full_doc_id"]
+                        chunk_key = f"{self.namespace}:{k}"
+                        doc_id_to_chunk_ids.setdefault(full_doc_id, []).append(chunk_key)
+
+                # 批量更新 Redis，将 list 转换为 JSON 字符串存储
+                pipe = redis.pipeline()
+                for full_doc_id, chunk_keys in doc_id_to_chunk_ids.items():
+                    key_name = f"{self.namespace}:doc_id:{full_doc_id}"
+                    # 获取现有值（如果存在）
+                    existing_value = await redis.get(key_name)
+                    existing_list = json.loads(existing_value) if existing_value else []
+
+                    # 去重合并新旧数据
+                    merged_list = list(set(existing_list + chunk_keys))
+                    pipe.set(key_name, json.dumps(merged_list))
+
+                await pipe.execute()
+
             except TypeError as e:
                 logger.error(f"JSON encode type error during upsert: {e}")
                 raise
