@@ -1,9 +1,11 @@
+import asyncio
 import os
 from typing import Any, final
 from dataclasses import dataclass
 import pipmaster as pm
 import configparser
 from contextlib import asynccontextmanager
+
 
 if not pm.is_installed("redis"):
     pm.install("redis")
@@ -15,6 +17,12 @@ from lightrag.utils import logger
 
 from lightrag.base import BaseKVStorage
 import json
+from redis.exceptions import (
+    ConnectionError,
+    TimeoutError,
+    RedisError,
+    AuthenticationError
+)
 
 
 config = configparser.ConfigParser()
@@ -24,6 +32,8 @@ config.read("config.ini", "utf-8")
 MAX_CONNECTIONS = 50
 SOCKET_TIMEOUT = 5.0
 SOCKET_CONNECT_TIMEOUT = 3.0
+MAX_RETRIES = 3 #最大尝试次数
+RETRY_DELAY = 0.5  # 重试间隔时间
 
 
 @final
@@ -36,6 +46,10 @@ class RedisKVStorage(BaseKVStorage):
         # Create a connection pool with limits
         self._pool = ConnectionPool.from_url(
             redis_url,
+            #check the connection in an interval frequency
+            health_check_interval=20, #health check
+            socket_keepalive=True, # timeout retry
+            retry_on_timeout=True, # keep tcp connection
             max_connections=MAX_CONNECTIONS,
             decode_responses=True,
             socket_timeout=SOCKET_TIMEOUT,
@@ -48,20 +62,53 @@ class RedisKVStorage(BaseKVStorage):
 
     @asynccontextmanager
     async def _get_redis_connection(self):
-        """Safe context manager for Redis operations."""
-        try:
-            yield self._redis
-        except ConnectionError as e:
-            logger.error(f"Redis connection error in {self.namespace}: {e}")
-            raise
-        except RedisError as e:
-            logger.error(f"Redis operation error in {self.namespace}: {e}")
-            raise
-        except Exception as e:
-            logger.error(
-                f"Unexpected error in Redis operation for {self.namespace}: {e}"
-            )
-            raise
+        """安全上下文管理器，带自动重连机制"""
+        retries = 0
+        while retries < MAX_RETRIES:
+            try:
+                # 测试连接是否有效
+                await self._redis.ping()
+                yield self._redis
+                return  # 成功则退出
+
+            except TimeoutError as e:
+                retries += 1
+                logger.warning(
+                    f"Redis timeout in {self.namespace} (attempt {retries}/{MAX_RETRIES}): {e}"
+                )
+                if retries < MAX_RETRIES:
+                    # 指数退避策略
+                    delay = RETRY_DELAY * (2 ** (retries - 1))
+                    await asyncio.sleep(delay)
+                    # 重置连接池
+                    await self._reset_connection()
+                else:
+                    logger.error(
+                        f"Max retries exceeded for Redis in {self.namespace}"
+                    )
+                    raise
+
+            except ConnectionError as e:
+                logger.error(f"Redis connection error in {self.namespace}: {e}")
+                # 立即尝试重置连接
+                await self._reset_connection()
+                retries += 1
+                if retries >= MAX_RETRIES:
+                    raise
+
+            except AuthenticationError as e:
+                logger.critical(f"Redis authentication failed: {e}")
+                raise  # 认证错误无法恢复，直接抛出
+
+            except RedisError as e:
+                logger.error(f"Redis operation error in {self.namespace}: {e}")
+                raise  # 其他Redis错误直接抛出
+
+            except Exception as e:
+                logger.error(
+                    f"Unexpected error in Redis operation for {self.namespace}: {e}"
+                )
+                raise
 
     async def close(self):
         """Close the Redis connection pool to prevent resource leaks."""
