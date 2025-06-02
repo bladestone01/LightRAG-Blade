@@ -814,7 +814,7 @@ class PGVectorStorage(BaseVectorStorage):
                 else:
                      entity_to_update[row["id"]] = self.__update_record__(row, doc_id, delete_chunk_ids)
 
-            logger.info("entity_to_update:{len(entity_to_update)}, entity_to_delete:{len(entity_to_delete)}")
+            logger.info(f"entity_to_update:{len(entity_to_update)}, entity_to_delete:{len(entity_to_delete)}")
             # execute the modification operation
             await self.__update_entity_records__(entity_to_update)
             await self.__delete_entity_records__(entity_to_delete)
@@ -845,13 +845,21 @@ class PGVectorStorage(BaseVectorStorage):
             return
 
         # update  the entity records with embedding vector
-        for  id, row in entity_to_updates.items():
-            vector_data = await self.embedding_func( row["content"])
-            row['content_vector'] = json.dumps( vector_data.tolist())
+        id_list = list(entity_to_updates.keys())
+        chunk_size = 20
+        text_chunk_two_array = [id_list[i:i + chunk_size] for i in range(0, len(id_list), chunk_size)]
+
+        embedding_tasks = [self.embedding_func(batch) for batch in text_chunk_two_array]
+        embeddings_list = await asyncio.gather(*embedding_tasks)
+        embeddings = np.concatenate(embeddings_list)
+
+        for index, id in enumerate(id_list):
+             vector_array = embeddings[index]
+             entity_to_updates[id]["content_vector"] = json.dumps(vector_array.tolist())
 
 
         for id, row in entity_to_updates.items():
-            update_sql = """UPDATE {table_name} SET file_path=$1, content=$2, content_vector=$3 WHERE id=$4"""
+            update_sql = f"UPDATE {table_name} SET file_path=$1, content=$2, content_vector=$3 WHERE id=$4"
             await self.db.execute(update_sql, {"file_path":row["file_path"], "content":row["content"], "content_vector": row["content_vector"], "id": id})
 
         logger.info(f"Update entity records successfully: {len(entity_to_updates)}")
@@ -906,12 +914,16 @@ class PGVectorStorage(BaseVectorStorage):
 
         content_list = dict_data["content"].split(GRAPH_FIELD_SEP)
         removed_idx_list = []
+        updated_chunk_ids = []
         for index, chunk_id in enumerate(dict_data['chunk_ids']):
             if  chunk_id in delete_chunk_ids:
                 removed_idx_list.append(index)
+            else:
+                 updated_chunk_ids.append(chunk_id)
 
         new_list = [x for i, x in enumerate(content_list) if i not in removed_idx_list]
         dict_data["content"] = GRAPH_FIELD_SEP.join(new_list)
+        dict_data["chunk_ids"] = updated_chunk_ids
 
         return dict_data
 
