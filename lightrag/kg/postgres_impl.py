@@ -7,6 +7,8 @@ from dataclasses import dataclass, field
 from typing import Any, Union, final
 import numpy as np
 import configparser
+from ..prompt import PROMPTS, GRAPH_FIELD_SEP
+import time
 
 from lightrag.types import KnowledgeGraph, KnowledgeGraphNode, KnowledgeGraphEdge
 
@@ -534,8 +536,6 @@ class PGKVStorage(BaseKVStorage):
         except Exception as e:
             logger.error(f"Error while deleting records from {self.namespace}: {e}")
 
-
-
     async def drop_cache_by_modes(self, modes: list[str] | None = None) -> bool:
         """Delete specific records from storage by cache mode
 
@@ -770,7 +770,7 @@ class PGVectorStorage(BaseVectorStorage):
         except Exception as e:
             logger.error(f"Error while deleting vectors from {self.namespace}: {e}")
 
-    async def delete_by_chunk_ids(self, delete_chunk_ids: list[str]) -> None:
+    async def delete_by_doc_id(self, doc_id:str, delete_chunk_ids: list[str]) -> None:
         """Delete specific records from storage by their IDs
 
         Args:
@@ -788,18 +788,165 @@ class PGVectorStorage(BaseVectorStorage):
             logger.error(f"Unknown namespace for deletion: {self.namespace}")
             return
 
-        update_sql = f"UPDATE {table_name} SET chunk_ids = ( SELECT ARRAY_AGG(elem) FROM UNNEST(chunk_ids1) AS elem WHERE elem <> ALL($1)) WHERE chunk_ids && ($2) AND array_length(chunk_ids, 1) >= 2"
-        # 处理数组长度=1的记录（删除整行）
-        delete_sql = f"DELETE FROM {table_name} WHERE chunk_ids && ($1) AND array_length(chunk_ids , 1) = 1 "
+        # 基于uuid和chunk_ids检索匹配的数据记录，实现分页的查询
+        # file_path字段存储了以<SEP>为分隔符的文件路径信息。
 
-        try:
-            await self.db.execute( update_sql, {"workspace": self.db.workspace, "delete_chunk_ids": delete_chunk_ids} )
-            await self.db.execute( delete_sql, {"workspace": self.db.workspace, "delete_chunk_ids": delete_chunk_ids} )
-            logger.debug(
-                f"Successfully deleted {len(delete_chunk_ids)} records from {self.namespace}"
-            )
-        except Exception as e:
-            logger.error(f"Error while deleting records from {self.namespace}: {e}")
+        # section1:  基于chunk ids和file path检索匹配的lightrag_vdb_relation记录，分页方式；检索条件为： chunk_ids包含任何入口list的chunk_id, file_path中包含该uuid
+        # 针对每一条记录，针对其file_path进行<SEP>分割，判断其中包含uuid的元素，然后删除该元素；如果剩余的 元素个数大于1，则将剩余的元素拼接成新的file_path，否则将该记录标记为删除，放入待删除列表中
+        # 对于file_path中剩余元素大于1的记录，则将chunk_ids中的数组元素，移除入口参数中的chunk_ids中的元素;如果chunk_ids 中没有元素，则将该记录标记为删除，放入待删除列表中；
+        #  chunk_ids如果不为空，则记录其中chunk_ids中包含入口chunk_ids元素的位置；由于content的内容以<SEP>作为分隔符，与chunk_ids中的chunk_id一一对应，按照其中的位置，删除对应的content内容，然后更新content内容；
+        # 记录上述待更新的记录列表，等待批量更新
+        # 基于上述待更新的列表和content，重新计算其content_vector, 然后批量更新记录。
+        start_time  = time.time()
+        entity_to_update = {}
+        entity_to_delete = {}
+        current_page = 1
+        page_size = 50
+        while True:
+            result = await self.paginated_query(table_name, current_page, page_size, where_clause=" where workspace=$1 AND file_path LIKE $2 AND chunk_ids && $3", \
+                                                params={"workspace": self.db.workspace, "file_path": f"%{doc_id}%", "chunk_ids": delete_chunk_ids})
+            logger.info(f"current page:{current_page} , page size:{page_size}, result size:{len(result)}")
+
+            # process the data
+            for row in result:
+                if self.__is_vector_record_delete__(row, doc_id, delete_chunk_ids):
+                    entity_to_delete[row["id"]] = row
+                else:
+                     entity_to_update[row["id"]] = self.__update_record__(row, doc_id, delete_chunk_ids)
+
+            logger.info("entity_to_update:{len(entity_to_update)}, entity_to_delete:{len(entity_to_delete)}")
+            # execute the modification operation
+            await self.__update_entity_records__(entity_to_update)
+            await self.__delete_entity_records__(entity_to_delete)
+
+            if not result or len(result) < page_size:
+                logger.info(f"Loop the data to the end, total page:{current_page}")
+                break;
+            current_page += 1
+        logger.info(f"Finished the loop in table {table_name}, total time:{time.time() - start_time}")
+
+    async def __update_entity_records__(self, entity_to_updates: dict[str, dict[str, Any]]) -> None:
+        """
+           更新记录
+        Args:
+            entity_to_updates: 
+
+        Returns:
+
+        """
+        if not entity_to_updates or len(entity_to_updates) == 0:
+            logger.info(f"No entity to update in postgresql vector db")
+            return
+
+        table_name = namespace_to_table_name(self.namespace)
+
+        if not table_name:
+            logger.error(f"Unknown namespace for deletion: {self.namespace}")
+            return
+
+        # update  the entity records with embedding vector
+        for  id, row in entity_to_updates.items():
+            vector_data = await self.embedding_func( row["content"])
+            row['content_vector'] = json.dumps( vector_data.tolist())
+
+
+        for id, row in entity_to_updates.items():
+            update_sql = """UPDATE {table_name} SET file_path=$1, content=$2, content_vector=$3 WHERE id=$4"""
+            await self.db.execute(update_sql, {"file_path":row["file_path"], "content":row["content"], "content_vector": row["content_vector"], "id": id})
+
+        logger.info(f"Update entity records successfully: {len(entity_to_updates)}")
+
+
+    async def  __delete_entity_records__(self, entity_to_delete: dict[str, dict[str, Any]]) -> None:
+         """
+          删除记录
+         Args:
+            self:
+            entity_to_delete:
+
+         Returns:
+
+         """
+         if not entity_to_delete or len(entity_to_delete) == 0:
+             logger.info(f"No entity to delete in postgresql vector db")
+             return
+
+         table_name = namespace_to_table_name(self.namespace)
+         if not table_name:
+             logger.error(f"Unknown namespace for deletion: {self.namespace}")
+             return
+
+         # 提取所有需要删除的 id
+         ids_to_delete = list(entity_to_delete.keys())
+
+         # 构造批量删除 SQL 语句
+         delete_sql = f"DELETE FROM {table_name} WHERE id = ANY($1)"
+
+         try:
+             await self.db.execute(delete_sql, {"ids": ids_to_delete})
+             logger.info(f"Successfully deleted {len(ids_to_delete)} entity records")
+         except Exception as e:
+             logger.error(f"Error while deleting entity records: {e}")
+         logger.info(f"Delete entity records successfully: {len(entity_to_delete)}")
+
+
+    def __update_record__(self, row, uuid:str, delete_chunk_ids:list) -> dict:
+        """
+          更新记录
+        """
+        dict_data = dict(row)
+        file_list = dict_data["file_path"].split(GRAPH_FIELD_SEP)
+        filtered_file_list = []
+
+        for file_path_str in file_list:
+            if not file_path_str.contains(uuid):
+                filtered_file_list.append(file_path_str)
+        if len(filtered_file_list) > 0:
+            dict_data["file_path"] = GRAPH_FIELD_SEP.join(filtered_file_list)
+
+        content_list = dict_data["content"].split(GRAPH_FIELD_SEP)
+        removed_idx_list = []
+        for index, chunk_id in enumerate(dict_data['chunk_ids']):
+            if  chunk_id in delete_chunk_ids:
+                removed_idx_list.append(index)
+
+        new_list = [x for i, x in enumerate(content_list) if i not in removed_idx_list]
+        dict_data["content"] = GRAPH_FIELD_SEP.join(new_list)
+
+        return dict_data
+
+    def __is_vector_record_delete__(self, row, uuid:str, delete_chunk_ids:list) -> bool:
+        """
+          判断当前记录是否需要删除
+         判断标准： 文件中有不包含uuid的文件路径，则认为更新/False。否则为True
+        Args:
+            row:
+
+        Returns: bool
+        """
+        if row["file_path"] is None:
+            return True
+
+        file_list = row["file_path"].split(GRAPH_FIELD_SEP)
+
+        for idx, file_path_str in enumerate(file_list):
+            if file_path_str is None:
+                logger.warning(f"file_list[{idx}] is None, skipping check.")
+                continue
+            if uuid not in file_path_str:
+                return False
+
+        return True
+
+    async def paginated_query(self, table_name:str, page:int=1, page_size:int=20, where_clause:str="", params:dict=None):
+        offset  = (page - 1) * page_size
+        sql_str =  f"SELECT * FROM {table_name}"
+
+        if where_clause:
+            sql_str += f" {where_clause}"
+
+        sql_str += f" ORDER BY id LIMIT {page_size} OFFSET {offset}"
+        return await  self.db.query(sql_str, params=params, multirows=True)
 
     async def delete_entity(self, entity_name: str) -> None:
         """Delete an entity by its name from the vector storage.

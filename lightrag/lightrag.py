@@ -1698,7 +1698,7 @@ class LightRAG:
                 # 基于chunk ids, lightrag_doc_chunks
                 await self.chunks_vdb.delete(chunk_ids)
                 logger.debug(f"Deleting {len(chunk_ids)} chunks in in KV storage text_chunks")
-                await self.text_chunks.delete_by_doc_ids([doc_id])
+                #await self.text_chunks.delete_by_doc_ids([doc_id])
 
             # 5. Find and process entities and relationships that have these chunks as source
             # Get all nodes and edges from the graph storage using storage-agnostic methods
@@ -1814,6 +1814,12 @@ class LightRAG:
                     logger.debug(
                         f"Updated relationship {src}-{tgt} with new source_id: {new_source_id}"
                     )
+
+            # customization to handle vdb data
+            if len(chunk_ids) > 0:
+                logger.info(f"start to customization delete vdb data with {len(chunk_ids)} chunks, doc_id: {doc_id}")
+                await self.entities_vdb.delete_by_doc_id(doc_id, chunk_ids)
+                await self.relationships_vdb.delete_by_doc_id(doc_id, chunk_ids)
 
             # 6. Delete original document and status
             logger.info(f"start to delete document {doc_id} in full docs")

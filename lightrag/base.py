@@ -222,8 +222,8 @@ class BaseVectorStorage(StorageNameSpace, ABC):
             ids: List of vector IDs to be deleted
         """
 
-    async def delete_by_chunk_ids(self, chunk_ids: list[str]) -> None:
-        """Delete vectors with specified chunk_ids
+    async def delete_by_doc_id(self, doc_id:str,  chunk_ids: list[str]) -> None:
+        """Delete vectors with file uuid, doc_id and chunk_ids
         """
         pass
 
