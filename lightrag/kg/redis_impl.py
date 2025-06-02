@@ -226,7 +226,7 @@ class RedisKVStorage(BaseKVStorage):
                 for k in data:
                     if "full_doc_id" in data[k]:
                         full_doc_id = data[k]["full_doc_id"]
-                        chunk_key = f"{self.namespace}:{k}"
+                        chunk_key = f"{k}"
                         doc_id_to_chunk_ids.setdefault(full_doc_id, []).append(chunk_key)
 
                 # 批量更新 Redis，将 list 转换为 JSON 字符串存储
