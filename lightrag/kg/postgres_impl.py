@@ -899,7 +899,7 @@ class PGVectorStorage(BaseVectorStorage):
         filtered_file_list = []
 
         for file_path_str in file_list:
-            if not file_path_str.contains(uuid):
+            if not uuid in file_path_str:
                 filtered_file_list.append(file_path_str)
         if len(filtered_file_list) > 0:
             dict_data["file_path"] = GRAPH_FIELD_SEP.join(filtered_file_list)
