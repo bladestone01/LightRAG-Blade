@@ -287,7 +287,7 @@ class RedisKVStorage(BaseKVStorage):
             chunk_ids =  await self.get_by_id("doc_id:"+doc_id)
             logger .debug(f"Found {len(chunk_ids)} chunks to delete doc_id {doc_id}")
             if chunk_ids:
-                self.delete(chunk_ids)
+                await self.delete(chunk_ids)
 
         async with self._get_redis_connection() as redis:
             pipe = redis.pipeline()
