@@ -770,7 +770,7 @@ class PGVectorStorage(BaseVectorStorage):
         except Exception as e:
             logger.error(f"Error while deleting vectors from {self.namespace}: {e}")
 
-    async def delete_by_chunkids(self, delete_chunk_ids: list[str]) -> None:
+    async def delete_by_chunk_ids(self, delete_chunk_ids: list[str]) -> None:
         """Delete specific records from storage by their IDs
 
         Args:

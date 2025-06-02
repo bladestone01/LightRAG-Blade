@@ -1682,9 +1682,10 @@ class LightRAG:
             # 2. Get all chunks related to this document
             # Find all chunks where full_doc_id equals the current doc_id
             all_chunks = await self.text_chunks.get_by_id("doc_id:"+ doc_id)
+            logger.debug(f"Found {len(all_chunks)} chunks for document {doc_id}")
 
             if not all_chunks or len(all_chunks) == 0:
-                logger.warning(f"No chunks found for document {doc_id}")
+                logger.warning(f"No chunks found for document {doc_id}, stop here in deleteing")
                 return
 
             # Get all related chunk IDs
@@ -1693,8 +1694,11 @@ class LightRAG:
 
             # 4. Delete chunks from vector database
             if chunk_ids:
-                await self.chunks_vdb.delete_by_chunk_ids(chunk_ids)
-                await self.text_chunks.delete(chunk_ids)
+                logger.debug(f"Deleting {len(chunk_ids)} chunks in lightrag_doc_chunks(vector chunk_docs)")
+                # 基于chunk ids, lightrag_doc_chunks
+                await self.chunks_vdb.delete(chunk_ids)
+                logger.debug(f"Deleting {len(chunk_ids)} chunks in in KV storage text_chunks")
+                await self.text_chunks.delete_by_doc_ids([doc_id])
 
             # 5. Find and process entities and relationships that have these chunks as source
             # Get all nodes and edges from the graph storage using storage-agnostic methods
@@ -1704,13 +1708,18 @@ class LightRAG:
             relationships_to_update = {}  # (src, tgt) -> new_source_id
 
             # Process entities - use storage-agnostic methods
+            logger.info(f"Processing entities by doc_id: {doc_id}")
             all_labels = await self.chunk_entity_relation_graph.get_all_labels()
+            logger.debug(f"Found {len(all_labels)} labels in document id:{doc_id}")
             for node_label in all_labels:
                 node_data = await self.chunk_entity_relation_graph.get_node(node_label)
+                logger.debug(f"Got node data in label:{node_label}: {node_data and 'source_id' in node_data}")
                 if node_data and "source_id" in node_data:
                     # Split source_id using GRAPH_FIELD_SEP
                     sources = set(node_data["source_id"].split(GRAPH_FIELD_SEP))
+                    logger.debug(f"Raw Source, entity labels: {node_label},sources: {sources}")
                     sources.difference_update(chunk_ids)
+                    logger.debug(f"After difference update, sources: {sources}, status: {not sources}")
                     if not sources:
                         entities_to_delete.add(node_label)
                         logger.debug(
@@ -1724,19 +1733,24 @@ class LightRAG:
                         )
 
             # Process relationships
+            logger.info(f"Processing relationships by doc_id: {doc_id}")
             for node_label in all_labels:
                 node_edges = await self.chunk_entity_relation_graph.get_node_edges(
                     node_label
                 )
+                logger.debug(f"Got node edges in label:{node_label}: len: len{node_edges}")
                 if node_edges:
                     for src, tgt in node_edges:
                         edge_data = await self.chunk_entity_relation_graph.get_edge(
                             src, tgt
                         )
+                        logger.debug(f"Got edge data in label:{node_label}:{edge_data}: {edge_data and 'source_id' in edge_data}")
                         if edge_data and "source_id" in edge_data:
                             # Split source_id using GRAPH_FIELD_SEP
                             sources = set(edge_data["source_id"].split(GRAPH_FIELD_SEP))
+                            logger.debug(f"Raw Source, relationships labels: {node_label},sources: {sources}")
                             sources.difference_update(chunk_ids)
+                            logger.debug(f"After relationships difference update, sources: {sources}, status: {not sources}")
                             if not sources:
                                 relationships_to_delete.add((src, tgt))
                                 logger.debug(
@@ -1750,6 +1764,7 @@ class LightRAG:
                                 )
 
             # Delete entities
+            logger.info(f"start to deleting entities with {len(entities_to_delete)} entities, doc_id: {doc_id}")
             if entities_to_delete:
                 for entity in entities_to_delete:
                     await self.entities_vdb.delete_entity(entity)
@@ -1760,6 +1775,7 @@ class LightRAG:
                 logger.debug(f"Deleted {len(entities_to_delete)} entities from graph")
 
             # Update entities
+            logger.info(f"start to update entities with {len(entities_to_update)} entities, doc_id: {doc_id}")
             for entity, new_source_id in entities_to_update.items():
                 node_data = await self.chunk_entity_relation_graph.get_node(entity)
                 if node_data:
@@ -1772,6 +1788,7 @@ class LightRAG:
                     )
 
             # Delete relationships
+            logger.info(f"start to deleting relationships with {len(relationships_to_update)} relationships, doc_id: {doc_id}")
             if relationships_to_delete:
                 for src, tgt in relationships_to_delete:
                     rel_id_0 = compute_mdhash_id(src + tgt, prefix="rel-")
@@ -1786,6 +1803,7 @@ class LightRAG:
                 )
 
             # Update relationships
+            logger.info(f"start to update relationships with {len(relationships_to_update)} relationships, doc_id: {doc_id}")
             for (src, tgt), new_source_id in relationships_to_update.items():
                 edge_data = await self.chunk_entity_relation_graph.get_edge(src, tgt)
                 if edge_data:
@@ -1798,7 +1816,9 @@ class LightRAG:
                     )
 
             # 6. Delete original document and status
+            logger.info(f"start to delete document {doc_id} in full docs")
             await self.full_docs.delete([doc_id])
+            logger.info(f"Deleted document {doc_id} with doc status")
             await self.doc_status.delete([doc_id])
 
             # 7. Ensure all indexes are updated

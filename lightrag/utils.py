@@ -1,12 +1,12 @@
 from __future__ import annotations
+
+import logging
 import weakref
 
 import asyncio
 import html
 import csv
 import json
-import logging
-import logging.handlers
 import os
 import re
 from dataclasses import dataclass
@@ -23,6 +23,7 @@ from lightrag.constants import (
     DEFAULT_LOG_FILENAME,
 )
 
+from lightrag.log.logwrapper import init_loguru,logger_instance as logger
 
 def get_env_value(
     env_key: str, default: any, value_type: type = str, special_none: bool = False
@@ -101,13 +102,6 @@ def set_verbose_debug(enabled: bool):
 statistic_data = {"llm_call": 0, "llm_cache": 0, "embed_call": 0}
 
 # Initialize logger
-logger = logging.getLogger("lightrag")
-logger.propagate = False  # prevent log message send to root loggger
-# Let the main application configure the handlers
-logger.setLevel(logging.INFO)
-
-# Set httpx logging level to WARNING
-logging.getLogger("httpx").setLevel(logging.WARNING)
 
 
 class LightragPathFilter(logging.Filter):
@@ -167,58 +161,7 @@ def setup_logger(
         log_file_path: Path to the log file. If None and file logging is enabled, defaults to lightrag.log in LOG_DIR or cwd
         enable_file_logging: Whether to enable logging to a file (defaults to True)
     """
-    # Configure formatters
-    detailed_formatter = logging.Formatter(
-        '%(asctime)s - %(levelname)s [%(filename)s:%(lineno)d] - %(funcName)s() - %(message)s'
-    )
-    simple_formatter = logging.Formatter('%(asctime)s - %(levelname)s [%(filename)s:%(lineno)d] - %(funcName)s() - %(message)s')
-
-    logger_instance = logging.getLogger(logger_name)
-    logger_instance.setLevel(level)
-    logger_instance.handlers = []  # Clear existing handlers
-    logger_instance.propagate = False
-
-    # Add console handler
-    console_handler = logging.StreamHandler()
-    console_handler.setFormatter(simple_formatter)
-    console_handler.setLevel(level)
-    logger_instance.addHandler(console_handler)
-
-    # Add file handler by default unless explicitly disabled
-    if enable_file_logging:
-        # Get log file path
-        if log_file_path is None:
-            log_dir = os.getenv("LOG_DIR", os.getcwd())
-            log_file_path = os.path.abspath(os.path.join(log_dir, DEFAULT_LOG_FILENAME))
-
-        # Ensure log directory exists
-        os.makedirs(os.path.dirname(log_file_path), exist_ok=True)
-
-        # Get log file max size and backup count from environment variables
-        log_max_bytes = get_env_value("LOG_MAX_BYTES", DEFAULT_LOG_MAX_BYTES, int)
-        log_backup_count = get_env_value(
-            "LOG_BACKUP_COUNT", DEFAULT_LOG_BACKUP_COUNT, int
-        )
-
-        try:
-            # Add file handler
-            file_handler = logging.handlers.RotatingFileHandler(
-                filename=log_file_path,
-                maxBytes=log_max_bytes,
-                backupCount=log_backup_count,
-                encoding="utf-8",
-            )
-            file_handler.setFormatter(detailed_formatter)
-            file_handler.setLevel(level)
-            logger_instance.addHandler(file_handler)
-        except PermissionError as e:
-            logger.warning(f"Could not create log file at {log_file_path}: {str(e)}")
-            logger.warning("Continuing with console logging only")
-
-    # Add path filter if requested
-    if add_filter:
-        path_filter = LightragPathFilter()
-        logger_instance.addFilter(path_filter)
+    init_loguru(logger, logger_name, level)
 
 
 class UnlimitedSemaphore:

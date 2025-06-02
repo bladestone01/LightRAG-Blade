@@ -268,6 +268,21 @@ class BaseKVStorage(StorageNameSpace, ABC):
             None
         """
 
+    async def delete_by_doc_ids(self, doc_ids: list[str]) -> None:
+        """Delete specific records from storage by their doc_ids
+
+        Importance notes for in-memory storage:
+        1. Changes will be persisted to disk during the next index_done_callback
+        2. update flags to notify other processes that data persistence is needed
+
+        Args:
+            doc_ids (list[str]): List of document IDs to be deleted from storage
+
+        Returns:
+            None
+        """
+        pass
+
 
     async def drop_cache_by_modes(self, modes: list[str] | None = None) -> bool:
         """Delete specific records from storage by cache mode

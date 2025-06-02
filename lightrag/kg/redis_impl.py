@@ -1,5 +1,6 @@
 import asyncio
 import os
+import time
 from typing import Any, final
 from dataclasses import dataclass
 import pipmaster as pm
@@ -261,6 +262,7 @@ class RedisKVStorage(BaseKVStorage):
         if not ids:
             return
 
+        logger.info(f"delete-action: Deleting {ids} entries from {self.namespace}")
         async with self._get_redis_connection() as redis:
             pipe = redis.pipeline()
             for id in ids:
@@ -271,6 +273,32 @@ class RedisKVStorage(BaseKVStorage):
             logger.info(
                 f"Deleted {deleted_count} of {len(ids)} entries from {self.namespace}"
             )
+
+    async def delete_by_doc_ids(self, doc_ids: list[str]) -> None:
+        """Delete specific records from storage by their doc_ids
+        """
+        if not doc_ids:
+            logger.info(f"未找到doc_ids: {doc_ids}")
+            return
+
+        start_time = time.time()
+        logger.info(f"Deleting doc_ids from KV Storage, doc_ids:{doc_ids}")
+        for doc_id in doc_ids:
+            chunk_ids =  await self.get_by_id("doc_id:"+doc_id)
+            logger .debug(f"Found {len(chunk_ids)} chunks to delete doc_id {doc_id}")
+            if chunk_ids:
+                self.delete(chunk_ids)
+
+        async with self._get_redis_connection() as redis:
+            pipe = redis.pipeline()
+            for id in doc_ids:
+                pipe.delete(f"{self.namespace}:doc_id:{id}")
+            await pipe.execute()
+            logger.info(f"Deleted {len(doc_ids)} doc_ids from {self.namespace}")
+        logger.info(f"End of Deleted Action: {len(doc_ids)} doc_ids from {self.namespace} cost {time.time()-start_time}s")
+
+
+
 
     async def drop_cache_by_modes(self, modes: list[str] | None = None) -> bool:
         """Delete specific records from storage by by cache mode
