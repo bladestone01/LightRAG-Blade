@@ -1910,6 +1910,8 @@ class LightRAG:
 
         except Exception as e:
             logger.error(f"Error while deleting document {doc_id}: {e}")
+            logger.error(traceback.format_exc())
+
 
     async def adelete_by_entity(self, entity_name: str) -> None:
         """Asynchronously delete an entity and all its relationships.
