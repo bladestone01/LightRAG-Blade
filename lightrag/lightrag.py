@@ -1682,11 +1682,10 @@ class LightRAG:
             # 2. Get all chunks related to this document
             # Find all chunks where full_doc_id equals the current doc_id
             all_chunks = await self.text_chunks.get_by_id("doc_id:"+ doc_id)
-            logger.debug(f"Found {len(all_chunks)} chunks for document {doc_id}")
-
             if not all_chunks or len(all_chunks) == 0:
                 logger.warning(f"No chunks found for document {doc_id}, stop here in deleteing")
                 return
+            logger.debug(f"Found {len(all_chunks)} chunks for document {doc_id}")
 
             # Get all related chunk IDs
             chunk_ids = set(all_chunks)
