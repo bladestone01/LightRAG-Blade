@@ -96,7 +96,7 @@ Output:
 ("relationship"{tuple_delimiter}"中华人民共和国国家卫生健康委员会"{tuple_delimiter}"健康信息数据集元数据操作实践"{tuple_delimiter}"发布关系"{tuple_delimiter}"发布"{tuple_delimiter}10){completion_delimiter}
 ("relationship"{tuple_delimiter}"健康信息数据集元数据操作实践"{tuple_delimiter}"健康信息数据集"{tuple_delimiter}"描述关系"{tuple_delimiter}"描述"{tuple_delimiter}10){completion_delimiter}
 ("relationship"{tuple_delimiter}"健康信息数据集元数据操作实践"{tuple_delimiter}"元数据"{tuple_delimiter}"使用关系"{tuple_delimiter}"使用"{tuple_delimiter}10){completion_delimiter}
-("relationship"{tuple_delimiter}"健康信息数据集元数据操作实践"{tuple_delimiter}"中华人民共和国卫生行业标准"{tuple_delimiter}"具体标准名称与标准类型的映射分类关系"{tuple_delimiter}"归类于"{tuple_delimiter}10){completion_delimiter}
+("relationship"{tuple_delimiter}"健康信息数据集元数据操作实践"{tuple_delimiter}"中华人民共和国卫生行业标准"{tuple_delimiter}"具体标准名称与标准类型的映射分类关系"{tuple_delimiter}"归属于"{tuple_delimiter}10){completion_delimiter}
 ("relationship"{tuple_delimiter}"健康信息数据集元数据操作实践"{tuple_delimiter}"2023-08-07"{tuple_delimiter}"发布日期关系"{tuple_delimiter}"发布日期"{tuple_delimiter}10){completion_delimiter}
 ("relationship"{tuple_delimiter}"健康信息数据集元数据操作实践"{tuple_delimiter}"2024-02-01"{tuple_delimiter}"生效日期关系"{tuple_delimiter}"生效日期"{tuple_delimiter}10){completion_delimiter}
 ("relationship"{tuple_delimiter}"WS/T 305—2023"{tuple_delimiter}"WS/T 305-2009"{tuple_delimiter}"新版标准替代旧版标准文件"{tuple_delimiter}"代替"{tuple_delimiter}9){completion_delimiter}
