@@ -45,7 +45,7 @@ PROMPTS["entity_extraction"] = """
 - relationship_description: 说明你认为源实体和目标实体关联的原因
 - relationship_strength: 表示源实体和目标实体关联强度的数值[1-10]
 - relationship_keywords: 一个或多个概括关系总体性质的高层次关键词，侧重于概念或主题，而不是具体细节
-将每个关系格式化为：("relationship"{tuple_delimiter}<source_entity>{tuple_delimiter}<target_entity>{tuple_delimiter}<relationship_description>{tuple_delimiter}<relationship_keywords>{tuple_delimiter}<relationship_strength>)
+将每个关系格式化为：("relationship"{tuple_delimiter}<target_entity>{tuple_delimiter}<source_entity>{tuple_delimiter}<relationship_description>{tuple_delimiter}<relationship_keywords>{tuple_delimiter}<relationship_strength>)
 
 3. 找出概括整篇文章的主要概念或主题的高层次关键词(high_level_keywords)。这些关键词应该抓住文档中呈现的总体思想。
 将内容关键词格式化为：("content_keywords"{tuple_delimiter}<high_level_keywords>)
