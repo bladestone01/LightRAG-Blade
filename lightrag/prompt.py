@@ -24,7 +24,7 @@ PROMPTS["entity_extraction"] = """
     - 能够将复杂的文本信息准确转化为简洁明了的三元组形式，同时确保信息的完整性和准确性。
 - Goals:
     1. 从标准文件中全面提取关键实体，涵盖标准类型（国家标准/行业标准/地方标准/团体标准）、标准一级分类、标准二级分类、标准名称、标准编号、发布部门等标准相关信息，对于特定标准，还需提取使用范围、技术要求、检验方法等关键信息。
-    2. 精准确定实体之间的关系，如"包括","发布","适用于","应符合","测定方法","检测指标", "编码为", ”对应于“,"归属于“等。
+    2. 精准确定实体之间的关系，如"包括","发布","发布于", "生效于", "适用于","应符合","测定方法","检测指标", "编码为", ”对应于“,"归属于“等。
     3. 为每个实体和关系赋予必要的属性，如指标数值、检验方法的具体步骤等，对于具体的检测方法以及指标，提取关键信息即可。
     4. 将提取的实体和关系整理为有效的三元组形式，便于进一步分析和应用，为挖掘国标发布的规律提供有力支持。
 - Constrains: 
@@ -97,8 +97,8 @@ Output:
 ("relationship"{tuple_delimiter}"健康信息数据集元数据操作实践"{tuple_delimiter}"健康信息数据集"{tuple_delimiter}"描述关系"{tuple_delimiter}"描述"{tuple_delimiter}10){completion_delimiter}
 ("relationship"{tuple_delimiter}"健康信息数据集元数据操作实践"{tuple_delimiter}"元数据"{tuple_delimiter}"使用关系"{tuple_delimiter}"使用"{tuple_delimiter}10){completion_delimiter}
 ("relationship"{tuple_delimiter}"健康信息数据集元数据操作实践"{tuple_delimiter}"中华人民共和国卫生行业标准"{tuple_delimiter}"具体标准名称与标准类型的映射分类关系"{tuple_delimiter}"归属于"{tuple_delimiter}10){completion_delimiter}
-("relationship"{tuple_delimiter}"健康信息数据集元数据操作实践"{tuple_delimiter}"2023-08-07"{tuple_delimiter}"发布日期关系"{tuple_delimiter}"发布日期"{tuple_delimiter}10){completion_delimiter}
-("relationship"{tuple_delimiter}"健康信息数据集元数据操作实践"{tuple_delimiter}"2024-02-01"{tuple_delimiter}"生效日期关系"{tuple_delimiter}"生效日期"{tuple_delimiter}10){completion_delimiter}
+("relationship"{tuple_delimiter}"健康信息数据集元数据操作实践"{tuple_delimiter}"2023-08-07"{tuple_delimiter}"发布日期关系"{tuple_delimiter}"发布于"{tuple_delimiter}10){completion_delimiter}
+("relationship"{tuple_delimiter}"健康信息数据集元数据操作实践"{tuple_delimiter}"2024-02-01"{tuple_delimiter}"生效日期关系"{tuple_delimiter}"生效于"{tuple_delimiter}10){completion_delimiter}
 ("relationship"{tuple_delimiter}"WS/T 305—2023"{tuple_delimiter}"WS/T 305-2009"{tuple_delimiter}"新版标准替代旧版标准文件"{tuple_delimiter}"代替"{tuple_delimiter}9){completion_delimiter}
 ("relationship"{tuple_delimiter}"健康信息数据集元数据操作实践"{tuple_delimiter}"Metadata specification of health information dataset"{tuple_delimiter}"标准包含中英文名称对应关系"{tuple_delimiter}"包括"{tuple_delimiter}8){completion_delimiter}
 ("content_keywords"{tuple_delimiter}"健康信息数据集，元数据标准，标准发布，标准实施，替代关系"){completion_delimiter}
