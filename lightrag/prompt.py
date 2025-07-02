@@ -16,20 +16,31 @@ PROMPTS["DEFAULT_USER_PROMPT"] = "n/a"
 
 PROMPTS["entity_extraction"] = """
 - Role: 知识图谱构建专家和生物安全与食品安全国家标准分析师
-- Background: 用户希望通过从生物安全和食品安全国家标准文件中提取知识图谱的三元组，挖掘国标发布的规律，从而更好地理解标准中的关键信息和逻辑关系，为相关领域的研究和实践提供支持。
-- Profile: 你是一位在知识图谱构建以及生物安全和食品安全国家标准分析领域具有深厚专业知识和丰富实践经验的专家，能够精准地从复杂的标准文件中提取有价值的信息，并将其转化为结构化的知识图谱三元组。
-- Skills: 你具备以下关键能力：
-    - 深入理解生物安全和食品安全国家标准文件的结构、内容以及发布规律。
-    - 熟练掌握知识图谱构建技术，能够高效识别和提取关键实体、关系和属性。
-    - 能够将复杂的文本信息准确转化为简洁明了的三元组形式，同时确保信息的完整性和准确性。
+- Background: 用户希望通过提取知识图谱三元组
+- Profile: 精准转化标准文件为结构化知识图谱的专家
+- Skills: 具备以下关键能力：
+    - 深度理解国家标准文件结构
+    - 熟练高效提取实体、关系和属性
+    - 确保三元组准确性与完整性
 - Goals:
-    1. 从标准文件中全面提取关键实体，涵盖标准类型（国家标准/行业标准/地方标准/团体标准）、标准一级分类、标准二级分类、标准名称、标准编号、发布部门等标准相关信息，对于特定标准，还需提取使用范围、技术要求、检验方法等关键信息。
-    2. 精准确定实体之间的关系，如"包括","发布","发布于", "生效于", "适用于","应符合","测定方法","检测指标", "编码为", ”对应于“,"归属于“等。
-    3. 为每个实体和关系赋予必要的属性，如指标数值、检验方法的具体步骤等，对于具体的检测方法以及指标，提取关键信息即可。
-    4. 将提取的实体和关系整理为有效的三元组形式，便于进一步分析和应用，为挖掘国标发布的规律提供有力支持。
+    1. 取实体（标准类型、名称、编号、技术要求等）
+    2. 确定关系（使用主动动词且方向正确）
+    3. 赋予必要属性
+    4. 整理为有效三元组
 - Constrains: 
-   1 提取的三元组必须准确反映标准文件的核心内容，确保信息的完整性和准确性，避免遗漏重要信息，同时保持简洁明了，便于理解和使用。
+   1  三元组必须准确反映标准文件的核心内容，确保信息的完整性和准确性，避免遗漏重要信息,保持简洁明了
    2 中国人民共和国国家标准、中华人民共和国XXX行业标准、XXX省市地方标准、XXX团体标准，分别简称为国家标准、行业标准、地方标准、团体标准，它们在实体中被定义为标准类型。
+   3 关系方向规则**: 'source_entity'必须是**能主动执行动作**的实体（如机构/标准）,`target_entity`必须是**动作接受者**（如日期/指标）,输出前验证：若`source_entity`无法执行该动作（如"日期"不能"发布"），则删除三元组. 
+   4. **关系动词规范**:
+     - 仅使用1-2个**主动语态动词**，禁用被动词汇
+     - **强制动词映射表**:
+       | 禁止词 | 替换词 | 适用场景               |
+       |--------|--------|----------------------|
+       | 归属于 | 分类为 | 标准→类型             |
+       | 发布于 | 发布   | 标准→日期            |
+       | 生效于 | 生效   | 标准→日期            |
+       | 适用于 | 规范   | 标准→对象            |
+       | 描述   | 包含   | 标准→技术要求         |
 输出语言使用{language}。
 - Workflow:
 1. 识别所有实体。为每个实体提取以下信息：
@@ -45,8 +56,11 @@ PROMPTS["entity_extraction"] = """
 - relationship_description: 说明你认为源实体和目标实体关联的原因
 - relationship_strength: 表示源实体和目标实体关联强度的数值[1-10]
 - relationship_keywords: 一个或多个概括关系总体性质的高层次关键词，侧重于概念或主题，而不是具体细节
-将每个关系输出严格遵守如下格式：("relationship"{tuple_delimiter}<target_entity>{tuple_delimiter}<source_entity>{tuple_delimiter}<relationship_description>{tuple_delimiter}<relationship_keywords>{tuple_delimiter}<relationship_strength>).
-这里着重强调一下：关系结果中先输出目标实体，再输出源实体.
+  输出结果规则: 
+    a. 关系结果中先输出target_entity目标实体，再输出source_entity源实体. 
+    b. 仅用1-2个主动动词（如“发布”“检测”），禁用被动语态。
+    c.输出前验证：若`source_entity`无法执行该动作，则丢弃三元组。
+    d.将每个关系输出严格遵守如下格式：("relationship"<|><target_entity><|><source_entity><|><relationship_description><|><relationship_keywords><|><relationship_strength>)
 3. 找出概括整篇文章的主要概念或主题的高层次关键词(high_level_keywords)。这些关键词应该抓住文档中呈现的总体思想。
 将内容关键词格式化为：("content_keywords"{tuple_delimiter}<high_level_keywords>)
 
@@ -66,7 +80,7 @@ PROMPTS["entity_extraction"] = """
 文本内容:
 {input_text}
 ######################
-输出:"""
+"""
 
 PROMPTS["entity_extraction_examples"] = [
     """示例1:
@@ -82,25 +96,25 @@ Text:
 #### 中华人民共和国国家卫生健康委员会 发布
 ```
 Output:
-("entity"{tuple_delimiter}"中华人民共和国国家卫生健康委员会"{tuple_delimiter}"机构"{tuple_delimiter}"负责发布中华人民共和国卫生行业标准的机构。){record_delimiter}
-("entity"{tuple_delimiter}"中华人民共和国卫生行业标准"{tuple_delimiter}"标准类型"{tuple_delimiter}"本标准的编号为WS/T 305—2023，规定卫生健康信息数据集的元数据标准，用于指导数据集规范化管理){record_delimiter}
-("entity"{tuple_delimiter}"健康信息数据集元数据操作实践"{tuple_delimiter}"具体标准名称"{tuple_delimiter}"本标准的编号为WS/T 305—2023，规定卫生健康信息数据集的元数据规范，用于指导数据集规范化管理){record_delimiter}
-("entity"{tuple_delimiter}"WS/T 305—2023"{tuple_delimiter}"标准编号"{tuple_delimiter}"现行有效的健康信息数据集元数据操作实践编号。){record_delimiter}
-("entity"{tuple_delimiter}"WS/T 305-2009"{tuple_delimiter}"标准编号"{tuple_delimiter}"被新版本标准WS/T 305—2023代替的旧版本标准。){record_delimiter}
-("entity"{tuple_delimiter}"Metadata specification of health information dataset"{tuple_delimiter}"名称"{tuple_delimiter}"健康信息数据集元数据操作实践的英文规范名称){record_delimiter}
-("entity"{tuple_delimiter}"健康信息数据集"{tuple_delimiter}"名称"{tuple_delimiter}"健康信息的数据集合，是元数据描述的核心对象。){record_delimiter}
-("entity"{tuple_delimiter}"元数据"{tuple_delimiter}"名称"{tuple_delimiter}"描述数据的数据，用于定义和描述卫生健康信息数据集的内容、结构及相关属性。){record_delimiter}
-("entity"{tuple_delimiter}"2023-08-07"{tuple_delimiter}"日期"{tuple_delimiter}"标准发布的日期，标志着该标准正式生效的时间点。){record_delimiter}
-("entity"{tuple_delimiter}"2024-02-01"{tuple_delimiter}"日期"{tuple_delimiter}"标准实施的日期，表明该标准从此时起开始执行。){record_delimiter}
+("entity"{tuple_delimiter}"中华人民共和国国家卫生健康委员会"{tuple_delimiter}"机构"{tuple_delimiter}"发布卫生行业标准的机构"){record_delimiter}
+("entity"{tuple_delimiter}"中华人民共和国卫生行业标准"{tuple_delimiter}"标准类型"{tuple_delimiter}"用以分类不同的标准类型"){record_delimiter}
+("entity"{tuple_delimiter}"健康信息数据集元数据操作实践"{tuple_delimiter}"具体标准名称"{tuple_delimiter}"标准全称，编号为WS/T 305—2023"){record_delimiter}
+("entity"{tuple_delimiter}"WS/T 305—2023"{tuple_delimiter}"标准编号"{tuple_delimiter}"标准编号"){record_delimiter}
+("entity"{tuple_delimiter}"WS/T 305-2009"{tuple_delimiter}"标准编号"{tuple_delimiter}"旧版本标准"){record_delimiter}
+("entity"{tuple_delimiter}"Metadata specification of health information dataset"{tuple_delimiter}"名称"{tuple_delimiter}"英文名称"){record_delimiter}
+("entity"{tuple_delimiter}"健康信息数据集"{tuple_delimiter}"名称"{tuple_delimiter}"数据集合"){record_delimiter}
+("entity"{tuple_delimiter}"元数据"{tuple_delimiter}"名称"{tuple_delimiter}"数据的数据"){record_delimiter}
+("entity"{tuple_delimiter}"2023-08-07"{tuple_delimiter}"日期"{tuple_delimiter}"标准发布日期"){record_delimiter}
+("entity"{tuple_delimiter}"2024-02-01"{tuple_delimiter}"日期"{tuple_delimiter}"标准实施日期"){record_delimiter}
 ("relationship"{tuple_delimiter}"健康信息数据集元数据操作实践"{tuple_delimiter}"WS/T 305—2023"{tuple_delimiter}"具体标准名称与标准编号的对应关系"{tuple_delimiter}"编号为"{tuple_delimiter}10){completion_delimiter}
 ("relationship"{tuple_delimiter}"健康信息数据集元数据操作实践"{tuple_delimiter}"中华人民共和国国家卫生健康委员会"{tuple_delimiter}"发布关系"{tuple_delimiter}"发布"{tuple_delimiter}10){completion_delimiter}
 ("relationship"{tuple_delimiter}"健康信息数据集"{tuple_delimiter}"健康信息数据集元数据操作实践"{tuple_delimiter}"描述关系"{tuple_delimiter}"描述"{tuple_delimiter}10){completion_delimiter}
 ("relationship"{tuple_delimiter}"元数据"{tuple_delimiter}"健康信息数据集元数据操作实践"{tuple_delimiter}"使用关系"{tuple_delimiter}"使用"{tuple_delimiter}10){completion_delimiter}
-("relationship"{tuple_delimiter}"中华人民共和国卫生行业标准"{tuple_delimiter}"健康信息数据集元数据操作实践"{tuple_delimiter}"具体标准名称与标准类型的映射分类关系"{tuple_delimiter}"归属于"{tuple_delimiter}10){completion_delimiter}
-("relationship"{tuple_delimiter}"2023-08-07"{tuple_delimiter}"健康信息数据集元数据操作实践"{tuple_delimiter}"发布日期关系"{tuple_delimiter}"发布于"{tuple_delimiter}10){completion_delimiter}
-("relationship"{tuple_delimiter}"2024-02-01"{tuple_delimiter}"健康信息数据集元数据操作实践"{tuple_delimiter}"生效日期关系"{tuple_delimiter}"生效于"{tuple_delimiter}10){completion_delimiter}
+("relationship"{tuple_delimiter}"中华人民共和国卫生行业标准"{tuple_delimiter}"健康信息数据集元数据操作实践"{tuple_delimiter}"该标准的标准类型"{tuple_delimiter}"分类为"{tuple_delimiter}10){completion_delimiter}
+("relationship"{tuple_delimiter}"2023-08-07"{tuple_delimiter}"健康信息数据集元数据操作实践"{tuple_delimiter}"标准发布日期"{tuple_delimiter}"发布"{tuple_delimiter}10){completion_delimiter}
+("relationship"{tuple_delimiter}"2024-02-01"{tuple_delimiter}"健康信息数据集元数据操作实践"{tuple_delimiter}"标准生效日期"{tuple_delimiter}"生效"{tuple_delimiter}10){completion_delimiter}
 ("relationship"{tuple_delimiter}"WS/T 305-2009"{tuple_delimiter}"WS/T 305—2023"{tuple_delimiter}"新版标准替代旧版标准文件"{tuple_delimiter}"代替"{tuple_delimiter}9){completion_delimiter}
-("relationship"{tuple_delimiter}"Metadata specification of health information dataset"{tuple_delimiter}"健康信息数据集元数据操作实践"{tuple_delimiter}"标准包含中英文名称对应关系"{tuple_delimiter}"翻译为"{tuple_delimiter}8){completion_delimiter}
+("relationship"{tuple_delimiter}"Metadata specification of health information dataset"{tuple_delimiter}"健康信息数据集元数据操作实践"{tuple_delimiter}"中英文名称对应"{tuple_delimiter}"翻译为"{tuple_delimiter}8){completion_delimiter}
 ("content_keywords"{tuple_delimiter}"健康信息数据集，元数据标准，标准发布，标准实施，替代关系"){completion_delimiter}
 #############################""",
     """Example 2:
@@ -112,25 +126,25 @@ Text:
 业务管理、法规司负责统筹管理。标准起草单位：中国人民解放军总医院、国家卫生健康委统计信息中心。标准主要起草人：刘建超、胡建平。
 ```
 Output:
-("entity"{tuple_delimiter}"卫生健康信息数据集元数据规范"{tuple_delimiter}"具体标准名称"{tuple_delimiter}"本标准为推荐性标准，代替WS/T 305－2009，由多个单位和技术人员共同起草。"){completion_delimiter}
-("entity"{tuple_delimiter}"WS/T 305－2009"{tuple_delimiter}"标准编号"{tuple_delimiter}"旧版标准，被本标准替代，内容涉及卫生信息数据集元数据规范。"){completion_delimiter}
-("entity"{tuple_delimiter}"卫生信息数据集元数据规范"{tuple_delimiter}"规范要求"{tuple_delimiter}"与WS/T 305－2009相对应的规范要求内容。"){completion_delimiter}
-("entity"{tuple_delimiter}"国家卫生健康标准委员会卫生健康信息标准专业委员会"{tuple_delimiter}"机构"{tuple_delimiter}"负责本标准的技术审查和技术咨询工作。"){completion_delimiter}
-("entity"{tuple_delimiter}"国家卫生健康委统计信息中心"{tuple_delimiter}"机构"{tuple_delimiter}"负责本标准的协调性和格式审查工作。"){completion_delimiter}
-("entity"{tuple_delimiter}"国家卫生健康委规划发展与信息化司"{tuple_delimiter}"机构"{tuple_delimiter}"负责本标准的业务管理工作。"){completion_delimiter}
-("entity"{tuple_delimiter}"国家卫生健康委法规司"{tuple_delimiter}"机构"{tuple_delimiter}"负责本标准的统筹管理工作。"){completion_delimiter}
-("entity"{tuple_delimiter}"中国人民解放军总医院"{tuple_delimiter}"机构"{tuple_delimiter}"参与本标准的起草工作。"){completion_delimiter}
-("entity"{tuple_delimiter}"刘建超"{tuple_delimiter}"人员"{tuple_delimiter}"本标准的主要起草人之一。"){completion_delimiter}
-("entity"{tuple_delimiter}"胡建平"{tuple_delimiter}"人员"{tuple_delimiter}"本标准的主要起草人之一。"){completion_delimiter}
-("relationship"{tuple_delimiter}"WS/T 305－2009"{tuple_delimiter}"卫生健康信息数据集元数据规范"{tuple_delimiter}"卫生健康信息数据集元数据规范代替WS/T 305－2009，两者属于前后版本关系。"{tuple_delimiter}"代替"{tuple_delimiter}10){completion_delimiter}
-("relationship"{tuple_delimiter}"卫生健康信息数据集元数据规范"{tuple_delimiter}"国家卫生健康标准委员会卫生健康信息标准专业委员会"{tuple_delimiter}"负责本标准的技术审查和技术咨询工作，与本标准存在业务管理关系。"{tuple_delimiter}"技术审查"{tuple_delimiter}8){completion_delimiter}
-("relationship"{tuple_delimiter}"卫生健康信息数据集元数据规范"{tuple_delimiter}"国家卫生健康委统计信息中心"{tuple_delimiter}"负责本标准的协调性和格式审查工作，与本标准存在业务管理关系。"{tuple_delimiter}"协调审查"{tuple_delimiter}8){completion_delimiter}
-("relationship"{tuple_delimiter}"卫生健康信息数据集元数据标准"{tuple_delimiter}"国家卫生健康委规划发展与信息化司"{tuple_delimiter}"负责本标准的业务管理工作，与本标准存在业务管理关系。"{tuple_delimiter}"业务管理"{tuple_delimiter}8){completion_delimiter}
-("relationship"{tuple_delimiter}"卫生健康信息数据集元数据规范"{tuple_delimiter}"国家卫生健康委法规司"{tuple_delimiter}"负责本标准的统筹管理工作，与本标准存在业务管理关系。"{tuple_delimiter}"统筹管理"{tuple_delimiter}8){completion_delimiter}
-("relationship"{tuple_delimiter}"卫生健康信息数据集元数据规范"{tuple_delimiter}"中国人民解放军总医院"{tuple_delimiter}"参与本标准的起草工作，与本标准存在起草关系。"{tuple_delimiter}"起草"{tuple_delimiter}9){completion_delimiter}
-("relationship"{tuple_delimiter}"卫生健康信息数据集元数据规范"{tuple_delimiter}"刘建超"{tuple_delimiter}"为主要起草人之一，与本标准存在起草关系。"{tuple_delimiter}"起草"{tuple_delimiter}9){completion_delimiter}
-("relationship"{tuple_delimiter}"卫生健康信息数据集元数据规范"{tuple_delimiter}"胡建平"{tuple_delimiter}"为主要起草人之一，与本标准存在起草关系。"{tuple_delimiter}"起草"{tuple_delimiter}9){completion_delimiter}
-("content_keywords"{tuple_delimiter}"推荐性标准, 标准替代, 技术审查, 协调审查, 业务管理, 统筹管理, 标准起草, 主要起草人"){completion_delimiter}
+("entity"{tuple_delimiter}"卫生健康信息数据集元数据规范"{tuple_delimiter}"具体标准名称"{tuple_delimiter}"具体标准名称"){completion_delimiter}
+("entity"{tuple_delimiter}"WS/T 305－2009"{tuple_delimiter}"标准编号"{tuple_delimiter}"旧版标准编号"){completion_delimiter}
+("entity"{tuple_delimiter}"卫生信息数据集元数据规范"{tuple_delimiter}"规范要求"{tuple_delimiter}"规范要求内容"){completion_delimiter}
+("entity"{tuple_delimiter}"国家卫生健康标准委员会卫生健康信息标准专业委员会"{tuple_delimiter}"机构"{tuple_delimiter}"标准的技术审查和技术咨询机构"){completion_delimiter}
+("entity"{tuple_delimiter}"国家卫生健康委统计信息中心"{tuple_delimiter}"机构"{tuple_delimiter}"协调标准和格式审查"){completion_delimiter}
+("entity"{tuple_delimiter}"国家卫生健康委规划发展与信息化司"{tuple_delimiter}"机构"{tuple_delimiter}"标准业务管理。"){completion_delimiter}
+("entity"{tuple_delimiter}"国家卫生健康委法规司"{tuple_delimiter}"机构"{tuple_delimiter}"标准的统筹管理"){completion_delimiter}
+("entity"{tuple_delimiter}"中国人民解放军总医院"{tuple_delimiter}"机构"{tuple_delimiter}"标准起草"){completion_delimiter}
+("entity"{tuple_delimiter}"刘建超"{tuple_delimiter}"人员"{tuple_delimiter}"标准起草人之一"){completion_delimiter}
+("entity"{tuple_delimiter}"胡建平"{tuple_delimiter}"人员"{tuple_delimiter}"标准起草人之一"){completion_delimiter}
+("relationship"{tuple_delimiter}"WS/T 305－2009"{tuple_delimiter}"卫生健康信息数据集元数据规范"{tuple_delimiter}"前后版本关系"{tuple_delimiter}"代替"{tuple_delimiter}10){completion_delimiter}
+("relationship"{tuple_delimiter}"卫生健康信息数据集元数据规范"{tuple_delimiter}"国家卫生健康标准委员会卫生健康信息标准专业委员会"{tuple_delimiter}"标准技术审查和技术咨询"{tuple_delimiter}"技术审查"{tuple_delimiter}8){completion_delimiter}
+("relationship"{tuple_delimiter}"卫生健康信息数据集元数据规范"{tuple_delimiter}"国家卫生健康委统计信息中心"{tuple_delimiter}"本标准协调和格式审查"{tuple_delimiter}"协调审查"{tuple_delimiter}8){completion_delimiter}
+("relationship"{tuple_delimiter}"卫生健康信息数据集元数据标准"{tuple_delimiter}"国家卫生健康委规划发展与信息化司"{tuple_delimiter}"标准业务管理"{tuple_delimiter}"业务管理"{tuple_delimiter}8){completion_delimiter}
+("relationship"{tuple_delimiter}"卫生健康信息数据集元数据规范"{tuple_delimiter}"国家卫生健康委法规司"{tuple_delimiter}"本标准统筹管理"{tuple_delimiter}"统筹管理"{tuple_delimiter}8){completion_delimiter}
+("relationship"{tuple_delimiter}"卫生健康信息数据集元数据规范"{tuple_delimiter}"中国人民解放军总医院"{tuple_delimiter}"标准起草"{tuple_delimiter}"起草"{tuple_delimiter}9){completion_delimiter}
+("relationship"{tuple_delimiter}"卫生健康信息数据集元数据规范"{tuple_delimiter}"刘建超"{tuple_delimiter}"起草人之一"{tuple_delimiter}"起草"{tuple_delimiter}9){completion_delimiter}
+("relationship"{tuple_delimiter}"卫生健康信息数据集元数据规范"{tuple_delimiter}"胡建平"{tuple_delimiter}"起草人之一"{tuple_delimiter}"起草"{tuple_delimiter}9){completion_delimiter}
+("content_keywords"{tuple_delimiter}"推荐性标准, 标准替代, 技术审查, 协调审查, 业务管理, 统筹管理, 标准起草, 起草人"){completion_delimiter}
 #############################""",
 ]
 
