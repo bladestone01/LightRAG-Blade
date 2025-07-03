@@ -30,7 +30,7 @@ PROMPTS["entity_extraction"] = """
 - Constrains: 
    1  三元组必须准确反映标准文件的核心内容，确保信息的完整性和准确性，避免遗漏重要信息,保持简洁明了
    2 中国人民共和国国家标准、中华人民共和国XXX行业标准、XXX省市地方标准、XXX团体标准，分别简称为国家标准、行业标准、地方标准、团体标准，它们在实体中被定义为标准类型。
-  
+   
 输出语言使用{language}。
 - Workflow:
 1. 识别所有实体。为每个实体提取以下信息：
@@ -47,9 +47,12 @@ PROMPTS["entity_extraction"] = """
 - relationship_strength: 表示源实体和目标实体关联强度的数值[1-10]
 - relationship_keywords: 一个或多个概括关系总体性质的高层次关键词，侧重于概念或主题，而不是具体细节
   输出结果规则: 
-    a.将每个关系输出严格遵守如下格式：("relationship"<|><source_entity><|><target_entity><|><relationship_description><|><relationship_keywords><|><relationship_strength>)
-    b. 关系方向规则: 'source_entity'必须是**能主动执行动作**的实体（如机构/标准）,`target_entity`必须是**动作接受者**（如日期/指标）,输出前验证：若`source_entity`无法执行该动作（如"日期"不能"发布"），则删除三元组. 
-    c. 关系动词规范 : 仅使用1-2个主动语态动词，禁用被动词汇;强制动词映射表:
+    a. 关系结果中先输出target_entity目标实体，再输出source_entity源实体. 
+    b. 将每个关系输出严格遵守如下格式：("relationship"<|><target_entity><|><source_entity><|><relationship_description><|><relationship_keywords><|><relationship_strength>)
+    c. 关系方向规则**: 'source_entity'必须是**能主动执行动作**的实体（如机构/标准）,`target_entity`必须是**动作接受者**（如日期/指标）,输出前验证：若`source_entity`无法执行该动作（如"日期"不能"发布"），则删除三元组. 
+     d. **关系动词规范**:
+     - 仅使用1-2个**主动语态动词**，禁用被动词汇
+     - **强制动词映射表**:
        | 禁止词 | 替换词 | 适用场景               |
        |--------|--------|----------------------|
        | 归属于 | 分类为 | 标准→类型             |
@@ -57,7 +60,6 @@ PROMPTS["entity_extraction"] = """
        | 生效于 | 生效   | 标准→日期            |
        | 适用于 | 规范   | 标准→对象            |
        | 描述   | 包含   | 标准→技术要求         |
-       
 3. 找出概括整篇文章的主要概念或主题的高层次关键词(high_level_keywords)。这些关键词应该抓住文档中呈现的总体思想。
 将内容关键词格式化为：("content_keywords"{tuple_delimiter}<high_level_keywords>)
 
@@ -81,55 +83,55 @@ PROMPTS["entity_extraction"] = """
 
 PROMPTS["entity_extraction_examples"] = [
     """示例1:
-   实体类型: ["机构", "人员", "检测方法", "标准类型", "具体标准名称", "标准编码", "名称", "分类", "规范要求", "日期"]
-   Text:
-   ```
-   ## 中华人民共和国卫生行业标准
-   #### WS/T 961—2023
-   代替WS/T 911-2003
-   # 食品安全国家标准 食品添加剂 水杨酸
-   #### National Food Safety Standard: Food Additive Salicylic Acid
-   #### 2023-08-07 发布 2024-02-01 实施
-   #### 中华人民共和国国家卫生部 发布
-   技术要求 1.1 感官要求：应符合表1 的规定。 表1 感官要求 项目要求色泽 无色至浅黄色
-   附 录 A 水杨酸甲酯含量的测定 A.1 仪器和设备 A.1.1 色谱仪：按GB/T 11538—2006中第5章的规定;
-   ```
-   Output:
-   ("entity"{tuple_delimiter}"中华人民共和国国家卫生部"{tuple_delimiter}"机构"{tuple_delimiter}"管理卫生行业的机构"){record_delimiter}
-   ("entity"{tuple_delimiter}"中华人民共和国卫生行业标准"{tuple_delimiter}"标准类型"{tuple_delimiter}"用以分类不同的标准类型"){record_delimiter}
-   ("entity"{tuple_delimiter}"食品安全国家标准 食品添加剂 水杨酸"{tuple_delimiter}"具体标准名称"{tuple_delimiter}"标准全称，编号为WS/T 961—2023"){record_delimiter}
-   ("entity"{tuple_delimiter}"WS/T 961—2023"{tuple_delimiter}"标准编号"{tuple_delimiter}"标准编号"){record_delimiter}
-   ("entity"{tuple_delimiter}"WS/T 911-2003"{tuple_delimiter}"标准编号"{tuple_delimiter}"旧版本标准"){record_delimiter}
-   ("entity"{tuple_delimiter}"National Food Safety Standard: Food Additive Salicylic Acid"{tuple_delimiter}"名称"{tuple_delimiter}"英文名称"){record_delimiter}
-   ("entity"{tuple_delimiter}"食品添加剂"{tuple_delimiter}"名称"{tuple_delimiter}"标准分类"){record_delimiter}
-   ("entity"{tuple_delimiter}"2023-08-07"{tuple_delimiter}"日期"{tuple_delimiter}"标准发布日期"){record_delimiter}
-   ("entity"{tuple_delimiter}"2024-02-01"{tuple_delimiter}"日期"{tuple_delimiter}"标准实施日期"){record_delimiter}
-   ("entity"{tuple_delimiter}"表1 感官要求"{tuple_delimiter}"规范要求"{tuple_delimiter}"感官指标的要求"){record_delimiter}
-   ("entity"{tuple_delimiter}"色泽"{tuple_delimiter}"规范要求"{tuple_delimiter}"感官指标要求中的色泽指标"){record_delimiter}
-   ("entity"{tuple_delimiter}"无色至浅黄色"{tuple_delimiter}"规范要求"{tuple_delimiter}"色泽的具体要求"){record_delimiter}
-   ("entity"{tuple_delimiter}"附录A"{tuple_delimiter}"规范要求"{tuple_delimiter}"水杨酸甲酯含量的测定"){record_delimiter}
-   ("entity"{tuple_delimiter}"色谱仪"{tuple_delimiter}"检测方法""{tuple_delimiter}"水杨酸甲酯含量的测定"){record_delimiter}
-   ("entity"{tuple_delimiter}"GB/T 11538—2006"{tuple_delimiter}"检测方法""{tuple_delimiter}"测定水杨酸甲酯含量的方法标准"){record_delimiter}
-   ("relationship"{tuple_delimiter}"食品安全国家标准 食品添加剂 水杨酸"{tuple_delimiter}"WS/T 961—2023"{tuple_delimiter}"具体标准名称与标准编号的对应关系"{tuple_delimiter}"编号为"{tuple_delimiter}10){completion_delimiter}
-   ("relationship"{tuple_delimiter}"中华人民共和国国家卫生部"{tuple_delimiter}"食品安全国家标准 食品添加剂 水杨酸"{tuple_delimiter}"机构发布具体标准的关系"{tuple_delimiter}"发布"{tuple_delimiter}10){completion_delimiter}
-   ("relationship"{tuple_delimiter}"水杨酸"{tuple_delimiter}"食品添加剂"{tuple_delimiter}"物质分类"{tuple_delimiter}"分类为"{tuple_delimiter}10){completion_delimiter}
-   ("relationship"{tuple_delimiter}"食品安全国家标准 食品添加剂 水杨酸"{tuple_delimiter}"中华人民共和国卫生行业标准"{tuple_delimiter}"该标准的标准类型"{tuple_delimiter}"分类为"{tuple_delimiter}10){completion_delimiter}
-   ("relationship"{tuple_delimiter}"2023-08-07"{tuple_delimiter}"食品安全国家标准 食品添加剂 水杨酸"{tuple_delimiter}"标准发布日期"{tuple_delimiter}"发布"{tuple_delimiter}10){completion_delimiter}
-   ("relationship"{tuple_delimiter}"2024-02-01"{tuple_delimiter}"食品安全国家标准 食品添加剂 水杨酸"{tuple_delimiter}"标准生效日期"{tuple_delimiter}"生效"{tuple_delimiter}10){completion_delimiter}
-   ("relationship"{tuple_delimiter}"WS/T 961—2023"{tuple_delimiter}"WS/T 911-2003"{tuple_delimiter}"新版标准替代旧版标准文件"{tuple_delimiter}"代替"{tuple_delimiter}9){completion_delimiter}
-   ("relationship"{tuple_delimiter}"食品安全国家标准 食品添加剂 水杨酸"{tuple_delimiter}"National Food Safety Standard: Food Additive Salicylic Acid"{tuple_delimiter}"中英文名称对应"{tuple_delimiter}"翻译为"{tuple_delimiter}8){completion_delimiter}
-   ("relationship"{tuple_delimiter}"食品安全国家标准 食品添加剂 水杨酸"{tuple_delimiter}"附录A"{tuple_delimiter}"包含附录内容"{tuple_delimiter}"包含"{tuple_delimiter}10){completion_delimiter}
-   ("relationship"{tuple_delimiter}"表1 感官要求"{tuple_delimiter}"色泽"{tuple_delimiter}"感官要求中的色泽指标"{tuple_delimiter}"包含"{tuple_delimiter}10){completion_delimiter}
-   ("relationship"{tuple_delimiter}"附录A"{tuple_delimiter}"表1 感官要求"{tuple_delimiter}"包含内容"{tuple_delimiter}"包含"{tuple_delimiter}10){completion_delimiter}
-   ("relationship"{tuple_delimiter}"GB/T 11538—2006"{tuple_delimiter}"色谱仪"{tuple_delimiter}"设备仪器"{tuple_delimiter}"使用"{tuple_delimiter}10){completion_delimiter}
-   ("content_keywords"{tuple_delimiter}"食品添加剂, 水杨酸，标准发布，标准实施，替代关系"){completion_delimiter}
+实体类型: ["机构", "人员", "检测方法", "标准类型", "具体标准名称", "标准编码", "名称", "分类", "规范要求", "日期"]
+Text:
+```
+## 中华人民共和国卫生行业标准
+#### WS/T 961—2023
+代替WS/T 911-2003
+# 食品安全国家标准 食品添加剂 水杨酸
+#### National Food Safety Standard: Food Additive Salicylic Acid
+#### 2023-08-07 发布 2024-02-01 实施
+#### 中华人民共和国国家卫生部 发布
+技术要求 1.1 感官要求：应符合表1 的规定。 表1 感官要求 项目要求色泽 无色至浅黄色
+附 录 A 水杨酸甲酯含量的测定 A.1 仪器和设备 A.1.1 色谱仪：按GB/T 11538—2006中第5章的规定;
+```
+Output:
+("entity"{tuple_delimiter}"中华人民共和国国家卫生部"{tuple_delimiter}"机构"{tuple_delimiter}"管理卫生行业的机构"){record_delimiter}
+("entity"{tuple_delimiter}"中华人民共和国卫生行业标准"{tuple_delimiter}"标准类型"{tuple_delimiter}"用以分类不同的标准类型"){record_delimiter}
+("entity"{tuple_delimiter}"食品安全国家标准 食品添加剂 水杨酸"{tuple_delimiter}"具体标准名称"{tuple_delimiter}"标准全称，编号为WS/T 961—2023"){record_delimiter}
+("entity"{tuple_delimiter}"WS/T 961—2023"{tuple_delimiter}"标准编号"{tuple_delimiter}"标准编号"){record_delimiter}
+("entity"{tuple_delimiter}"WS/T 911-2003"{tuple_delimiter}"标准编号"{tuple_delimiter}"旧版本标准"){record_delimiter}
+("entity"{tuple_delimiter}"National Food Safety Standard: Food Additive Salicylic Acid"{tuple_delimiter}"名称"{tuple_delimiter}"英文名称"){record_delimiter}
+("entity"{tuple_delimiter}"食品添加剂"{tuple_delimiter}"名称"{tuple_delimiter}"标准分类"){record_delimiter}
+("entity"{tuple_delimiter}"2023-08-07"{tuple_delimiter}"日期"{tuple_delimiter}"标准发布日期"){record_delimiter}
+("entity"{tuple_delimiter}"2024-02-01"{tuple_delimiter}"日期"{tuple_delimiter}"标准实施日期"){record_delimiter}
+("entity"{tuple_delimiter}"表1 感官要求"{tuple_delimiter}"规范要求"{tuple_delimiter}"感官指标的要求"){record_delimiter}
+("entity"{tuple_delimiter}"色泽"{tuple_delimiter}"规范要求"{tuple_delimiter}"感官指标要求中的色泽指标"){record_delimiter}
+("entity"{tuple_delimiter}"无色至浅黄色"{tuple_delimiter}"规范要求"{tuple_delimiter}"色泽的具体要求"){record_delimiter}
+("entity"{tuple_delimiter}"附录A"{tuple_delimiter}"规范要求"{tuple_delimiter}"水杨酸甲酯含量的测定"){record_delimiter}
+("entity"{tuple_delimiter}"色谱仪"{tuple_delimiter}"检测方法""{tuple_delimiter}"水杨酸甲酯含量的测定"){record_delimiter}
+("entity"{tuple_delimiter}"GB/T 11538—2006"{tuple_delimiter}"检测方法""{tuple_delimiter}"测定水杨酸甲酯含量的方法标准"){record_delimiter}
+("relationship"{tuple_delimiter}"WS/T 961—2023"{tuple_delimiter}"食品安全国家标准 食品添加剂 水杨酸"{tuple_delimiter}"具体标准名称与标准编号的对应关系"{tuple_delimiter}"编号为"{tuple_delimiter}10){completion_delimiter}
+("relationship"{tuple_delimiter}"食品安全国家标准 食品添加剂 水杨酸"{tuple_delimiter}"中华人民共和国国家卫生部"{tuple_delimiter}"机构发布具体标准的关系"{tuple_delimiter}"发布"{tuple_delimiter}10){completion_delimiter}
+("relationship"{tuple_delimiter}"食品添加剂"{tuple_delimiter}"水杨酸"{tuple_delimiter}"物质分类"{tuple_delimiter}"分类为"{tuple_delimiter}10){completion_delimiter}
+("relationship"{tuple_delimiter}"中华人民共和国卫生行业标准"{tuple_delimiter}"食品安全国家标准 食品添加剂 水杨酸"{tuple_delimiter}"该标准的标准类型"{tuple_delimiter}"分类为"{tuple_delimiter}10){completion_delimiter}
+("relationship"{tuple_delimiter}"食品安全国家标准 食品添加剂 水杨酸"{tuple_delimiter}"2023-08-07"{tuple_delimiter}"标准发布日期"{tuple_delimiter}"发布"{tuple_delimiter}10){completion_delimiter}
+("relationship"{tuple_delimiter}"食品安全国家标准 食品添加剂 水杨酸"{tuple_delimiter}"2024-02-01"{tuple_delimiter}"标准生效日期"{tuple_delimiter}"生效"{tuple_delimiter}10){completion_delimiter}
+("relationship"{tuple_delimiter}"WS/T 911-2003"{tuple_delimiter}"WS/T 961—2023"{tuple_delimiter}"新版标准替代旧版标准文件"{tuple_delimiter}"代替"{tuple_delimiter}9){completion_delimiter}
+("relationship"{tuple_delimiter}"National Food Safety Standard: Food Additive Salicylic Acid"{tuple_delimiter}"食品安全国家标准 食品添加剂 水杨酸"{tuple_delimiter}"中英文名称对应"{tuple_delimiter}"翻译为"{tuple_delimiter}8){completion_delimiter}
+("relationship"{tuple_delimiter}"附录A"{tuple_delimiter}"食品安全国家标准 食品添加剂 水杨酸"{tuple_delimiter}"包含附录内容"{tuple_delimiter}"包含"{tuple_delimiter}10){completion_delimiter}
+("relationship"{tuple_delimiter}"色泽"{tuple_delimiter}"表1 感官要求"{tuple_delimiter}"感官要求中的色泽指标"{tuple_delimiter}"包含"{tuple_delimiter}10){completion_delimiter}
+("relationship"{tuple_delimiter}"表1 感官要求"{tuple_delimiter}"附录A"{tuple_delimiter}"包含的内容"{tuple_delimiter}"包含"{tuple_delimiter}10){completion_delimiter}
+("relationship"{tuple_delimiter}"色谱仪"{tuple_delimiter}"GB/T 11538—2006"{tuple_delimiter}"设备仪器"{tuple_delimiter}"使用"{tuple_delimiter}10){completion_delimiter}
+("content_keywords"{tuple_delimiter}"食品添加剂, 水杨酸，标准发布，标准实施，替代关系"){completion_delimiter}
 #############################""",
     """Example 2:
 实体类型: ["机构", "人员", "检测方法", "标准类型", "具体标准名称", "标准编码", "名称", "分类", "规范要求", "日期"]
 Text:
 ```
  卫生健康信息数据集元数据规范为推荐性标准, 此标准代替WS/T 305－2009 《卫生信息数据集元数据规范》。与WS/T 305－2009相比，主要为
-编辑性修改。此标准由国家卫生健康标准委员会卫生健康信息标准专业委员会负责技术审查，法规司负责统筹管理。标准起草单位：中国人民解放军总医院。标准主要起草人：刘建超。
+编辑性修改。此标准由国家卫生健康标准委员会卫生健康信息标准专业委员会负责技术审查、国家卫生健康委法规司负责统筹管理。标准起草单位：国家卫生健康委统计信息中心。标准主要起草人：刘建超。
 ```
 Output:
 ("entity"{tuple_delimiter}"卫生健康信息数据集元数据规范"{tuple_delimiter}"具体标准名称"{tuple_delimiter}"具体标准名称"){completion_delimiter}
@@ -139,11 +141,11 @@ Output:
 ("entity"{tuple_delimiter}"国家卫生健康委统计信息中心"{tuple_delimiter}"机构"{tuple_delimiter}"协调标准和格式审查"){completion_delimiter}
 ("entity"{tuple_delimiter}"国家卫生健康委法规司"{tuple_delimiter}"机构"{tuple_delimiter}"标准的统筹管理"){completion_delimiter}
 ("entity"{tuple_delimiter}"刘建超"{tuple_delimiter}"人员"{tuple_delimiter}"标准起草人之一"){completion_delimiter}
-("relationship"{tuple_delimiter}"卫生健康信息数据集元数据规范"{tuple_delimiter}"WS/T 305－2009"{tuple_delimiter}"前后版本关系"{tuple_delimiter}"代替"{tuple_delimiter}10){completion_delimiter}
-("relationship"{tuple_delimiter}"国家卫生健康标准委员会卫生健康信息标准专业委员会"{tuple_delimiter}"卫生健康信息数据集元数据规范"{tuple_delimiter}"标准技术审查和技术咨询"{tuple_delimiter}"技术审查"{tuple_delimiter}8){completion_delimiter}
-("relationship"{tuple_delimiter}"国家卫生健康委统计信息中心"{tuple_delimiter}"卫生健康信息数据集元数据规范"{tuple_delimiter}"本标准协调和格式审查"{tuple_delimiter}"协调审查"{tuple_delimiter}8){completion_delimiter}
-("relationship"{tuple_delimiter}"国家卫生健康委法规司"{tuple_delimiter}"卫生健康信息数据集元数据规范"{tuple_delimiter}"本标准统筹管理"{tuple_delimiter}"统筹管理"{tuple_delimiter}8){completion_delimiter}
-("relationship"{tuple_delimiter}"刘建超"{tuple_delimiter}"卫生健康信息数据集元数据规范"{tuple_delimiter}"起草人之一"{tuple_delimiter}"起草"{tuple_delimiter}9){completion_delimiter}
+("relationship"{tuple_delimiter}"WS/T 305－2009"{tuple_delimiter}"卫生健康信息数据集元数据规范"{tuple_delimiter}"前后版本关系"{tuple_delimiter}"代替"{tuple_delimiter}10){completion_delimiter}
+("relationship"{tuple_delimiter}"卫生健康信息数据集元数据规范"{tuple_delimiter}"国家卫生健康标准委员会卫生健康信息标准专业委员会"{tuple_delimiter}"标准技术审查和技术咨询"{tuple_delimiter}"技术审查"{tuple_delimiter}8){completion_delimiter}
+("relationship"{tuple_delimiter}"卫生健康信息数据集元数据规范"{tuple_delimiter}"国家卫生健康委统计信息中心"{tuple_delimiter}"本标准协调和格式审查"{tuple_delimiter}"协调审查"{tuple_delimiter}8){completion_delimiter}
+("relationship"{tuple_delimiter}"卫生健康信息数据集元数据规范"{tuple_delimiter}"国家卫生健康委法规司"{tuple_delimiter}"本标准统筹管理"{tuple_delimiter}"统筹管理"{tuple_delimiter}8){completion_delimiter}
+("relationship"{tuple_delimiter}"卫生健康信息数据集元数据规范"{tuple_delimiter}"刘建超"{tuple_delimiter}"起草人之一"{tuple_delimiter}"起草"{tuple_delimiter}9){completion_delimiter}
 ("content_keywords"{tuple_delimiter}"推荐性标准, 标准替代, 技术审查, 协调审查, 业务管理, 统筹管理, 标准起草, 起草人"){completion_delimiter}
 #############################""",
 ]
