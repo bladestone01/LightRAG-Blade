@@ -119,8 +119,8 @@ PROMPTS["entity_extraction_examples"] = [
    ("relationship"{tuple_delimiter}"WS/T 961—2023"{tuple_delimiter}"WS/T 911-2003"{tuple_delimiter}"新版标准替代旧版标准文件"{tuple_delimiter}"代替"{tuple_delimiter}9){completion_delimiter}
    ("relationship"{tuple_delimiter}"食品安全国家标准 食品添加剂 水杨酸"{tuple_delimiter}"National Food Safety Standard: Food Additive Salicylic Acid"{tuple_delimiter}"中英文名称对应"{tuple_delimiter}"翻译为"{tuple_delimiter}8){completion_delimiter}
    ("relationship"{tuple_delimiter}"食品安全国家标准 食品添加剂 水杨酸"{tuple_delimiter}"附录A"{tuple_delimiter}"包含附录内容"{tuple_delimiter}"包含"{tuple_delimiter}10){completion_delimiter}
-   ("relationship"{tuple_delimiter}"表1 感官要求"{tuple_delimiter}"色泽"{tuple_delimiter}"感官要求中的色泽指标"{tuple_delimiter}"包含"{tuple_delimiter}10){completion_delimiter}
-   ("relationship"{tuple_delimiter}"附录A"{tuple_delimiter}"表1 感官要求"{tuple_delimiter}"包含内容"{tuple_delimiter}"包含"{tuple_delimiter}10){completion_delimiter}
+   ("relationship"{tuple_delimiter}"附录A"{tuple_delimiter}"感官要求"{tuple_delimiter}"包含内容"{tuple_delimiter}"包含"{tuple_delimiter}10){completion_delimiter}
+   ("relationship"{tuple_delimiter}"感官要求"{tuple_delimiter}"色泽"{tuple_delimiter}"感官要求中的色泽指标"{tuple_delimiter}"包含"{tuple_delimiter}10){completion_delimiter}
    ("relationship"{tuple_delimiter}"GB/T 11538—2006"{tuple_delimiter}"色谱仪"{tuple_delimiter}"设备仪器"{tuple_delimiter}"使用"{tuple_delimiter}10){completion_delimiter}
    ("content_keywords"{tuple_delimiter}"食品添加剂, 水杨酸，标准发布，标准实施，替代关系"){completion_delimiter}
 #############################""",
