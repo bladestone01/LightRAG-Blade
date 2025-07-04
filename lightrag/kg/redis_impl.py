@@ -41,12 +41,11 @@ RETRY_DELAY = 0.5  # 重试间隔时间
 @dataclass
 class RedisKVStorage(BaseKVStorage):
     def __post_init__(self):
-        redis_url = os.environ.get(
-            "REDIS_URI", config.get("redis", "uri", fallback="redis://localhost:6379")
-        )
+        redis_uri = self.get_redis_config_url()
+        logger.info(f"Loading config from local config: {redis_uri}")
         # Create a connection pool with limits
         self._pool = ConnectionPool.from_url(
-            redis_url,
+            redis_uri,
             #check the connection in an interval frequency
             health_check_interval=20, #health check
             socket_keepalive=True, # timeout retry
@@ -61,12 +60,29 @@ class RedisKVStorage(BaseKVStorage):
             f"Initialized Redis connection pool for {self.namespace} with max {MAX_CONNECTIONS} connections"
         )
 
+    def get_redis_config_url(self):
+        """
+        获取Redis配置的URL
+        Returns:
+        """
+        redis_uri = os.getenv("REDIS_URI")
+        redis_host = os.getenv("REDIS_HOST")
+        redis_port = os.getenv("REDIS_PORT")
+        redis_db = os.getenv("REDIS_DB")
+        redis_password = os.getenv("REDIS_PASSWORD")
+        if redis_password:
+            redis_uri = f"redis://:{redis_password}@{redis_host}:{redis_port}/{redis_db}"
+
+        return redis_uri
+
     async def _reset_connection(self):
         """重置Redis连接池"""
         logger.warning("Resetting Redis connection pool...")
         try:
-            # 关闭旧连接池
-            await self._pool.disconnect()
+            # Close the old Redis client (closes all connections)
+            if hasattr(self, "_redis") and self._redis:
+                await self._redis.close()
+            logger.info("Old Redis connection pool closed successfully")
         except Exception as e:
             logger.error(f"Error disconnecting old pool: {e}")
 
@@ -74,6 +90,28 @@ class RedisKVStorage(BaseKVStorage):
         self._pool = self._create_connection_pool()
         self._redis = Redis(connection_pool=self._pool)
         logger.info("Redis connection pool reset successfully")
+
+    def _create_connection_pool(self):
+        """创建Redis连接池"""
+        logger.info("Recreating Redis connection pool...")
+        redis_uri = self.get_redis_config_url()
+        logger.info(f"Loading config from local config: {redis_uri}")
+        # Create a connection pool with limits
+        self._pool = ConnectionPool.from_url(
+            redis_uri,
+            # check the connection in an interval frequency
+            health_check_interval=20,  # health check
+            socket_keepalive=True,  # timeout retry
+            retry_on_timeout=True,  # keep tcp connection
+            max_connections=MAX_CONNECTIONS,
+            decode_responses=True,
+            socket_timeout=SOCKET_TIMEOUT,
+            socket_connect_timeout=SOCKET_CONNECT_TIMEOUT,
+        )
+        self._redis = Redis(connection_pool=self._pool)
+        logger.info(
+            f"recreate Redis connection pool for {self.namespace} with max {MAX_CONNECTIONS} connections"
+        )
 
     @asynccontextmanager
     async def _get_redis_connection(self):
