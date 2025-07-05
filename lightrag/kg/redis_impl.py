@@ -70,8 +70,9 @@ class RedisKVStorage(BaseKVStorage):
         redis_port = os.getenv("REDIS_PORT")
         redis_db = os.getenv("REDIS_DB")
         redis_password = os.getenv("REDIS_PASSWORD")
+        redis_username = os.getenv("REDIS_USERNAME")
         if redis_password:
-            redis_uri = f"redis://:{redis_password}@{redis_host}:{redis_port}/{redis_db}"
+            redis_uri = f"redis://{redis_username}:{redis_password}@{redis_host}:{redis_port}/{redis_db}"
 
         return redis_uri
 
