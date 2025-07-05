@@ -1,6 +1,7 @@
 import asyncio
 import os
 import time
+import traceback
 from typing import Any, final
 from dataclasses import dataclass
 import pipmaster as pm
@@ -98,7 +99,7 @@ class RedisKVStorage(BaseKVStorage):
         redis_uri = self.get_redis_config_url()
         logger.info(f"Loading config from local config: {redis_uri}")
         # Create a connection pool with limits
-        self._pool = ConnectionPool.from_url(
+        pool = ConnectionPool.from_url(
             redis_uri,
             # check the connection in an interval frequency
             health_check_interval=20,  # health check
@@ -109,10 +110,12 @@ class RedisKVStorage(BaseKVStorage):
             socket_timeout=SOCKET_TIMEOUT,
             socket_connect_timeout=SOCKET_CONNECT_TIMEOUT,
         )
-        self._redis = Redis(connection_pool=self._pool)
         logger.info(
             f"recreate Redis connection pool for {self.namespace} with max {MAX_CONNECTIONS} connections"
         )
+
+        return pool
+
 
     @asynccontextmanager
     async def _get_redis_connection(self):
@@ -140,10 +143,12 @@ class RedisKVStorage(BaseKVStorage):
                     logger.error(
                         f"Max retries exceeded for Redis in {self.namespace}"
                     )
+                    logger.error(traceback.format_exc())
                     raise
 
             except ConnectionError as e:
                 logger.error(f"Redis connection error in {self.namespace}: {e}")
+                logger.error(traceback.format_exc())
                 # 立即尝试重置连接
                 await self._reset_connection()
                 retries += 1
@@ -152,16 +157,19 @@ class RedisKVStorage(BaseKVStorage):
 
             except AuthenticationError as e:
                 logger.critical(f"Redis authentication failed: {e}")
+                logger.error(traceback.format_exc())
                 raise  # 认证错误无法恢复，直接抛出
 
             except RedisError as e:
                 logger.error(f"Redis operation error in {self.namespace}: {e}")
+                logger.error(traceback.format_exc())
                 raise  # 其他Redis错误直接抛出
 
             except Exception as e:
                 logger.error(
                     f"Unexpected error in Redis operation for {self.namespace}: {e}"
                 )
+                logger.error(traceback.format_exc())
                 raise
 
     async def close(self):
