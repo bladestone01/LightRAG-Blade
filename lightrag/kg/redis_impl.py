@@ -32,8 +32,8 @@ config.read("config.ini", "utf-8")
 
 # Constants for Redis connection pool
 MAX_CONNECTIONS = 50
-SOCKET_TIMEOUT = 5.0
-SOCKET_CONNECT_TIMEOUT = 3.0
+SOCKET_TIMEOUT = 10.0
+SOCKET_CONNECT_TIMEOUT = 5.0
 MAX_RETRIES = 3 #最大尝试次数
 RETRY_DELAY = 0.5  # 重试间隔时间
 
