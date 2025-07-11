@@ -41,7 +41,7 @@ def init_loguru_files(logger_instance, logger_name:str, log_path: str, log_level
     # sys.stdout = StreamToLogger("INFO")
     # sys.stderr = StreamToLogger("ERROR")
 
-    logger_instance.add(f"{log_path}/{logger_name}_{time_str}.log", rotation="500MB", encoding="utf-8", enqueue=True, retention="6")
-    logger_instance.add(f"{log_path}/{logger_name}_{time_str}_debug.log", rotation="500MB", encoding="utf-8", enqueue=True, retention="6", level="DEBUG")
-    logger_instance.add(f"{log_path}/{logger_name}_{time_str}_info.log", rotation="200MB", encoding="utf-8", enqueue=True, retention="6", level="INFO")
+    logger_instance.add(f"{log_path}/{logger_name}_{time_str}.log", rotation="500MB", encoding="utf-8", enqueue=True, retention="5 days")
+    logger_instance.add(f"{log_path}/{logger_name}_{time_str}_debug.log", rotation="500MB", encoding="utf-8", enqueue=True, retention="5 days", level="DEBUG")
+    logger_instance.add(f"{log_path}/{logger_name}_{time_str}_info.log", rotation="200MB", encoding="utf-8", enqueue=True, retention="5 days", level="INFO")
     logger_instance.add(f"{log_path}/{logger_name}_{time_str}_error.log", rotation="100MB", encoding="utf-8", enqueue=True, retention="5 days", level="ERROR")
