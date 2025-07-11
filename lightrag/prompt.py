@@ -10,7 +10,7 @@ PROMPTS["DEFAULT_TUPLE_DELIMITER"] = "<|>"
 PROMPTS["DEFAULT_RECORD_DELIMITER"] = "##"
 PROMPTS["DEFAULT_COMPLETION_DELIMITER"] = "<|COMPLETE|>"
 
-PROMPTS["DEFAULT_ENTITY_TYPES"] = ["机构", "人员", "检测方法", "标准类型", "具体标准名称", "标准编码", "名称", "分类", "规范要求", "日期"]
+PROMPTS["DEFAULT_ENTITY_TYPES"] = ["机构", "人员", "检测方法", "标准类型", "具体标准名称", "标准编码", "名称", "分类", "规范要求", "日期",  "检测设备"]
 
 PROMPTS["DEFAULT_USER_PROMPT"] = "n/a"
 
@@ -33,7 +33,7 @@ PROMPTS["entity_extraction"] = """
   
 输出语言使用{language}。
 - Workflow:
-1. 识别所有实体。为每个实体提取以下信息：
+1. 识别所有实体, 实体必须符合实体类型:["机构", "人员", "检测方法", "标准类型", "具体标准名称", "标准编码", "名称", "分类", "规范要求", "日期",  "检测设备"]。为每个实体提取以下信息：
 - entity_name: 实体名称（保持原文语言。）
 - entity_type: 实体类型（从以下选项中选择：[{entity_types}]）
 - entity_description: 对实体属性及活动的完整描述
@@ -81,7 +81,7 @@ PROMPTS["entity_extraction"] = """
 
 PROMPTS["entity_extraction_examples"] = [
     """示例1:
-   实体类型: ["机构", "人员", "检测方法", "标准类型", "具体标准名称", "标准编码", "名称", "分类", "规范要求", "日期"]
+   实体类型: ["机构", "人员", "检测方法", "标准类型", "具体标准名称", "标准编码", "名称", "分类", "规范要求", "日期", "检测设备"]
    Text:
    ```
    ## 中华人民共和国卫生行业标准
@@ -91,8 +91,6 @@ PROMPTS["entity_extraction_examples"] = [
    #### National Food Safety Standard: Food Additive Salicylic Acid
    #### 2023-08-07 发布 2024-02-01 实施
    #### 中华人民共和国国家卫生部 发布
-   技术要求 1.1 感官要求：应符合表1 的规定。 表1 感官要求 项目要求色泽 无色至浅黄色
-   附 录 A 水杨酸甲酯含量的测定 A.1 仪器和设备 A.1.1 色谱仪：按GB/T 11538—2006中第5章的规定;
    ```
    Output:
    ("entity"{tuple_delimiter}"中华人民共和国国家卫生部"{tuple_delimiter}"机构"{tuple_delimiter}"管理卫生行业的机构"){record_delimiter}
@@ -104,11 +102,6 @@ PROMPTS["entity_extraction_examples"] = [
    ("entity"{tuple_delimiter}"食品添加剂"{tuple_delimiter}"名称"{tuple_delimiter}"标准分类"){record_delimiter}
    ("entity"{tuple_delimiter}"2023-08-07"{tuple_delimiter}"日期"{tuple_delimiter}"标准发布日期"){record_delimiter}
    ("entity"{tuple_delimiter}"2024-02-01"{tuple_delimiter}"日期"{tuple_delimiter}"标准实施日期"){record_delimiter}
-   ("entity"{tuple_delimiter}"表1 感官要求"{tuple_delimiter}"规范要求"{tuple_delimiter}"感官指标的要求"){record_delimiter}
-   ("entity"{tuple_delimiter}"色泽"{tuple_delimiter}"规范要求"{tuple_delimiter}"感官指标要求中的色泽指标"){record_delimiter}
-   ("entity"{tuple_delimiter}"无色至浅黄色"{tuple_delimiter}"规范要求"{tuple_delimiter}"色泽的具体要求"){record_delimiter}
-   ("entity"{tuple_delimiter}"附录A"{tuple_delimiter}"规范要求"{tuple_delimiter}"水杨酸甲酯含量的测定"){record_delimiter}
-   ("entity"{tuple_delimiter}"色谱仪"{tuple_delimiter}"检测方法""{tuple_delimiter}"水杨酸甲酯含量的测定"){record_delimiter}
    ("entity"{tuple_delimiter}"GB/T 11538—2006"{tuple_delimiter}"检测方法""{tuple_delimiter}"测定水杨酸甲酯含量的方法标准"){record_delimiter}
    ("relationship"{tuple_delimiter}"食品安全国家标准 食品添加剂 水杨酸"{tuple_delimiter}"WS/T 961—2023"{tuple_delimiter}"具体标准名称与标准编号的对应关系"{tuple_delimiter}"编号为"{tuple_delimiter}10){completion_delimiter}
    ("relationship"{tuple_delimiter}"中华人民共和国国家卫生部"{tuple_delimiter}"食品安全国家标准 食品添加剂 水杨酸"{tuple_delimiter}"机构发布具体标准的关系"{tuple_delimiter}"发布"{tuple_delimiter}10){completion_delimiter}
@@ -119,9 +112,6 @@ PROMPTS["entity_extraction_examples"] = [
    ("relationship"{tuple_delimiter}"WS/T 961—2023"{tuple_delimiter}"WS/T 911-2003"{tuple_delimiter}"新版标准替代旧版标准文件"{tuple_delimiter}"代替"{tuple_delimiter}9){completion_delimiter}
    ("relationship"{tuple_delimiter}"食品安全国家标准 食品添加剂 水杨酸"{tuple_delimiter}"National Food Safety Standard: Food Additive Salicylic Acid"{tuple_delimiter}"中英文名称对应"{tuple_delimiter}"翻译为"{tuple_delimiter}8){completion_delimiter}
    ("relationship"{tuple_delimiter}"食品安全国家标准 食品添加剂 水杨酸"{tuple_delimiter}"附录A"{tuple_delimiter}"包含附录内容"{tuple_delimiter}"包含"{tuple_delimiter}10){completion_delimiter}
-   ("relationship"{tuple_delimiter}"附录A"{tuple_delimiter}"感官要求"{tuple_delimiter}"包含内容"{tuple_delimiter}"包含"{tuple_delimiter}10){completion_delimiter}
-   ("relationship"{tuple_delimiter}"感官要求"{tuple_delimiter}"色泽"{tuple_delimiter}"感官要求中的色泽指标"{tuple_delimiter}"包含"{tuple_delimiter}10){completion_delimiter}
-   ("relationship"{tuple_delimiter}"GB/T 11538—2006"{tuple_delimiter}"色谱仪"{tuple_delimiter}"设备仪器"{tuple_delimiter}"使用"{tuple_delimiter}10){completion_delimiter}
    ("content_keywords"{tuple_delimiter}"食品添加剂, 水杨酸，标准发布，标准实施，替代关系"){completion_delimiter}
 #############################""",
     """Example 2:
