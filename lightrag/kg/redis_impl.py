@@ -31,7 +31,7 @@ config = configparser.ConfigParser()
 config.read("config.ini", "utf-8")
 
 # Constants for Redis connection pool
-MAX_CONNECTIONS = 50
+MAX_CONNECTIONS = 1000
 SOCKET_TIMEOUT = 10.0
 SOCKET_CONNECT_TIMEOUT = 5.0
 MAX_RETRIES = 3 #最大尝试次数
