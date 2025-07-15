@@ -1595,30 +1595,55 @@ async def _find_most_related_text_unit_from_entities(
                 tasks.append((c_id, index, this_edges))
 
     # Process in batches tasks at a time to avoid overwhelming resources
-    batch_size = 5
-    results = []
+    # Create a list of all chunk IDs that need to be fetched.
+    c_ids_to_fetch = [c_id for c_id, _, _ in tasks]
 
-    for i in range(0, len(tasks), batch_size):
-        batch_tasks = tasks[i : i + batch_size]
-        batch_results = await asyncio.gather(
-            *[text_chunks_db.get_by_id(c_id) for c_id, _, _ in batch_tasks]
-        )
-        results.extend(batch_results)
+    # Fetch all chunk data concurrently using a single asyncio.gather call.
+    # This allows the asyncio event loop to manage all I/O operations efficiently.
+    if c_ids_to_fetch:
+        results = await asyncio.gather(* [text_chunks_db.get_by_id(c_id) for c_id in c_ids_to_fetch])
+    else:
+        results = []
 
-    for (c_id, index, this_edges), data in zip(tasks, results):
+    # Create a mapping from c_id to its fetched data for quick lookup.
+    c_id_to_data_map = {c_id: data for c_id, data in zip(c_ids_to_fetch, results)}
+
+    # Now, update the all_text_units_lookup using the map.
+    for c_id, index, this_edges in tasks:
+        data = c_id_to_data_map.get(c_id)
         all_text_units_lookup[c_id] = {
             "data": data,
             "order": index,
             "relation_counts": 0,
         }
 
-        if this_edges:
-            for e in this_edges:
-                if (
-                    e[1] in all_one_hop_text_units_lookup
-                    and c_id in all_one_hop_text_units_lookup[e[1]]
-                ):
-                    all_text_units_lookup[c_id]["relation_counts"] += 1
+        # if this_edges:
+        #     for e in this_edges:
+        #         if (
+        #             e[1] in all_one_hop_text_units_lookup
+        #             and c_id in all_one_hop_text_units_lookup[e[1]]
+        #         ):
+        #             all_text_units_lookup[c_id]["relation_counts"] += 1
+    # 1. Invert the lookup for faster access.
+    # Map each text unit to the set of one-hop neighbors that contain it.
+    text_unit_to_neighbors = defaultdict(set)
+    for neighbor, text_units_set in all_one_hop_text_units_lookup.items():
+        for text_unit_id in text_units_set:
+            text_unit_to_neighbors[text_unit_id].add(neighbor)
+
+    # 2. Calculate relation_counts more efficiently.
+    for c_id, lookup_value in all_text_units_lookup.items():
+        # Get the set of neighbors associated with the current text unit.
+        neighbors_in_chunk = text_unit_to_neighbors.get(c_id, set())
+        # Find which initial node this chunk belongs to.
+        initial_node_index = lookup_value["order"]
+        # Get the neighbors of that initial node.
+        initial_node_neighbors = {edge[1] for edge in edges[initial_node_index]}
+        # The relation count is the number of neighbors of the initial node
+        # that are also present in the current text chunk.
+        # This is a fast set intersection operation.
+        count = len(initial_node_neighbors.intersection(neighbors_in_chunk))
+        all_text_units_lookup[c_id]["relation_counts"] = count
 
     # Filter out None values and ensure data has content
     all_text_units = [
