@@ -556,6 +556,7 @@ class LightRAG:
         split_by_character_only: bool = False,
         ids: str | list[str] | None = None,
         file_paths: str | list[str] | None = None,
+        build_vector_index: bool = True,
     ) -> None:
         """Sync Insert documents with checkpoint support
 
@@ -567,11 +568,17 @@ class LightRAG:
             split_by_character is None, this parameter is ignored.
             ids: single string of the document ID or list of unique document IDs, if not provided, MD5 hash IDs will be generated
             file_paths: single string of the file path or list of file paths, used for citation
+            build_vector_index: If False, skips the vector indexing step during insertion. Defaults to True.
         """
         loop = always_get_an_event_loop()
         loop.run_until_complete(
             self.ainsert(
-                input, split_by_character, split_by_character_only, ids, file_paths
+                input,
+                split_by_character,
+                split_by_character_only,
+                ids,
+                file_paths,
+                build_vector_index,
             )
         )
 
@@ -582,6 +589,7 @@ class LightRAG:
         split_by_character_only: bool = False,
         ids: str | list[str] | None = None,
         file_paths: str | list[str] | None = None,
+        build_vector_index: bool = True,
     ) -> None:
         """Async Insert documents with checkpoint support
 
@@ -593,10 +601,11 @@ class LightRAG:
             split_by_character is None, this parameter is ignored.
             ids: list of unique document IDs, if not provided, MD5 hash IDs will be generated
             file_paths: list of file paths corresponding to each document, used for citation
+            build_vector_index: If False, skips the vector indexing step during insertion. Defaults to True.
         """
         await self.apipeline_enqueue_documents(input, ids, file_paths)
         await self.apipeline_process_enqueue_documents(
-            split_by_character, split_by_character_only
+            split_by_character, split_by_character_only, build_vector_index
         )
 
     # TODO: deprecated, use insert instead
@@ -812,6 +821,7 @@ class LightRAG:
         self,
         split_by_character: str | None = None,
         split_by_character_only: bool = False,
+        build_vector_index: bool = True,  # Add the new parameter here
     ) -> None:
         """
         Process pending documents by splitting them into chunks, processing
@@ -909,6 +919,7 @@ class LightRAG:
                     status_doc: DocProcessingStatus,
                     split_by_character: str | None,
                     split_by_character_only: bool,
+                    build_vector_index: bool,  # Pass the flag here
                     pipeline_status: dict,
                     pipeline_status_lock: asyncio.Lock,
                     semaphore: asyncio.Semaphore,
@@ -958,6 +969,7 @@ class LightRAG:
                             }
 
                             # Process document (text chunks and full docs) in parallel
+                            tasks = []
                             # Create tasks with references for potential cancellation
                             doc_status_task = asyncio.create_task(
                                 self.doc_status.upsert(
@@ -977,29 +989,35 @@ class LightRAG:
                                     }
                                 )
                             )
-                            chunks_vdb_task = asyncio.create_task(
-                                self.chunks_vdb.upsert(chunks)
-                            )
+                            tasks.append(doc_status_task)
+
+                            if build_vector_index:
+                                chunks_vdb_task = asyncio.create_task(
+                                    self.chunks_vdb.upsert(chunks)
+                                )
+                                tasks.append(chunks_vdb_task)
+                            else:
+                                chunks_vdb_task = None  # Ensure the variable exists
+
                             entity_relation_task = asyncio.create_task(
                                 self._process_entity_relation_graph(
                                     chunks, pipeline_status, pipeline_status_lock
                                 )
                             )
+                            tasks.append(entity_relation_task)
+
                             full_docs_task = asyncio.create_task(
                                 self.full_docs.upsert(
                                     {doc_id: {"content": status_doc.content}}
                                 )
                             )
+                            tasks.append(full_docs_task)
+
                             text_chunks_task = asyncio.create_task(
                                 self.text_chunks.upsert(chunks)
                             )
-                            tasks = [
-                                doc_status_task,
-                                chunks_vdb_task,
-                                entity_relation_task,
-                                full_docs_task,
-                                text_chunks_task,
-                            ]
+                            tasks.append(text_chunks_task)
+
                             await asyncio.gather(*tasks)
                             file_extraction_stage_ok = True
 
@@ -1016,12 +1034,11 @@ class LightRAG:
                                 pipeline_status["history_messages"].append(error_msg)
 
                                 # Cancel other tasks as they are no longer meaningful
-                                for task in [
-                                    chunks_vdb_task,
-                                    entity_relation_task,
-                                    full_docs_task,
-                                    text_chunks_task,
-                                ]:
+                                non_vdb_tasks = [entity_relation_task, full_docs_task, text_chunks_task]
+                                if chunks_vdb_task:
+                                    non_vdb_tasks.append(chunks_vdb_task)
+
+                                for task in non_vdb_tasks:
                                     if not task.done():
                                         task.cancel()
 
@@ -1065,6 +1082,7 @@ class LightRAG:
                                 current_file_number=current_file_number,
                                 total_files=total_files,
                                 file_path=file_path,
+                                build_vector_index=build_vector_index,  # Pass the flag here
                             )
 
                             await self.doc_status.upsert(
@@ -1134,6 +1152,7 @@ class LightRAG:
                             status_doc,
                             split_by_character,
                             split_by_character_only,
+                            build_vector_index,  # Pass the flag here
                             pipeline_status,
                             pipeline_status_lock,
                             semaphore,
@@ -1237,6 +1256,7 @@ class LightRAG:
         custom_kg: dict[str, Any],
         full_doc_id: str = None,
         file_path: str = "custom_kg",
+        build_vector_index: bool = True,  # Add the new parameter here
     ) -> None:
         update_storage = False
         try:
@@ -1269,7 +1289,7 @@ class LightRAG:
                 chunk_to_source_map[source_id] = chunk_id
                 update_storage = True
 
-            if all_chunks_data:
+            if all_chunks_data and build_vector_index:
                 await asyncio.gather(
                     self.chunks_vdb.upsert(all_chunks_data),
                     self.text_chunks.upsert(all_chunks_data),
@@ -1360,34 +1380,36 @@ class LightRAG:
                 update_storage = True
 
             # Insert entities into vector storage with consistent format
-            data_for_vdb = {
-                compute_mdhash_id(dp["entity_name"], prefix="ent-"): {
-                    "content": dp["entity_name"] + "\n" + dp["description"],
-                    "entity_name": dp["entity_name"],
-                    "source_id": dp["source_id"],
-                    "description": dp["description"],
-                    "entity_type": dp["entity_type"],
-                    "file_path": file_path,  # Add file path
+            if build_vector_index:
+                data_for_vdb = {
+                    compute_mdhash_id(dp["entity_name"], prefix="ent-"): {
+                        "content": dp["entity_name"] + "\n" + dp["description"],
+                        "entity_name": dp["entity_name"],
+                        "source_id": dp["source_id"],
+                        "description": dp["description"],
+                        "entity_type": dp["entity_type"],
+                        "file_path": file_path,  # Add file path
+                    }
+                    for dp in all_entities_data
                 }
-                for dp in all_entities_data
-            }
-            await self.entities_vdb.upsert(data_for_vdb)
+                await self.entities_vdb.upsert(data_for_vdb)
 
             # Insert relationships into vector storage with consistent format
-            data_for_vdb = {
-                compute_mdhash_id(dp["src_id"] + dp["tgt_id"], prefix="rel-"): {
-                    "src_id": dp["src_id"],
-                    "tgt_id": dp["tgt_id"],
-                    "source_id": dp["source_id"],
-                    "content": f"{dp['keywords']}\t{dp['src_id']}\n{dp['tgt_id']}\n{dp['description']}",
-                    "keywords": dp["keywords"],
-                    "description": dp["description"],
-                    "weight": dp["weight"],
-                    "file_path": file_path,  # Add file path
+            if build_vector_index:
+                data_for_vdb = {
+                    compute_mdhash_id(dp["src_id"] + dp["tgt_id"], prefix="rel-"): {
+                        "src_id": dp["src_id"],
+                        "tgt_id": dp["tgt_id"],
+                        "source_id": dp["source_id"],
+                        "content": f"{dp['keywords']}\t{dp['src_id']}\n{dp['tgt_id']}\n{dp['description']}",
+                        "keywords": dp["keywords"],
+                        "description": dp["description"],
+                        "weight": dp["weight"],
+                        "file_path": file_path,  # Add file path
+                    }
+                    for dp in all_relationships_data
                 }
-                for dp in all_relationships_data
-            }
-            await self.relationships_vdb.upsert(data_for_vdb)
+                await self.relationships_vdb.upsert(data_for_vdb)
 
         except Exception as e:
             logger.error(f"Error in ainsert_custom_kg: {e}")
@@ -1987,6 +2009,94 @@ class LightRAG:
             tgt_entity,
             include_vector_data,
         )
+
+    def build_vector_index(self) -> None:
+        """Sync version of abuild_vector_index."""
+        loop = always_get_an_event_loop()
+        loop.run_until_complete(self.abuild_vector_index())
+
+    async def abuild_vector_index(self) -> None:
+        """
+        Builds the vector index for all existing chunks, entities, and relationships.
+        This method is useful when documents have been inserted with build_vector_index=False.
+        """
+        logger.info("Starting to build vector index for all data.")
+
+        # 1. Index all chunks
+        # We assume text_chunks KV store has a get_all method
+        all_chunks = await self.text_chunks.get_all()
+        if all_chunks:
+            logger.info(f"Indexing {len(all_chunks)} text chunks.")
+            await self.chunks_vdb.upsert(all_chunks)
+        else:
+            logger.info("No text chunks found to index.")
+
+        # 2. Index all entities and relationships from the graph
+        all_labels = await self.chunk_entity_relation_graph.get_all_labels()
+        if not all_labels:
+            logger.info("No entities or relationships found in the graph to index.")
+            await self._insert_done()
+            return
+
+        logger.info(f"Found {len(all_labels)} entity labels to process.")
+        entities_to_index = {}
+        relationships_to_index = {}
+
+        for label in all_labels:
+            node_data = await self.chunk_entity_relation_graph.get_node(label)
+            if node_data:
+                entity_name = node_data.get("entity_name") or label
+                description = node_data.get("description", "")
+                source_id = node_data.get("source_id", "")
+                entity_type = node_data.get("entity_type", "UNKNOWN")
+                file_path = node_data.get("file_path", "unknown_source")
+
+                entities_to_index[compute_mdhash_id(entity_name, prefix="ent-")] = {
+                    "content": f"{entity_name}\n{description}",
+                    "entity_name": entity_name,
+                    "source_id": source_id,
+                    "description": description,
+                    "entity_type": entity_type,
+                    "file_path": file_path,
+                }
+
+            node_edges = await self.chunk_entity_relation_graph.get_node_edges(label)
+            if node_edges:
+                for src, tgt in node_edges:
+                    edge_data = await self.chunk_entity_relation_graph.get_edge(src, tgt)
+                    if edge_data:
+                        description = edge_data.get("description", "")
+                        keywords = edge_data.get("keywords", "")
+                        source_id = edge_data.get("source_id", "")
+                        weight = edge_data.get("weight", 1.0)
+                        file_path = edge_data.get("file_path", "unknown_source")
+
+                        relationships_to_index[compute_mdhash_id(src + tgt, prefix="rel-")] = {
+                            "src_id": src,
+                            "tgt_id": tgt,
+                            "source_id": source_id,
+                            "content": f"{keywords}\t{src}\n{tgt}\n{description}",
+                            "keywords": keywords,
+                            "description": description,
+                            "weight": weight,
+                            "file_path": file_path,
+                        }
+
+        if entities_to_index:
+            logger.info(f"Indexing {len(entities_to_index)} entities.")
+            await self.entities_vdb.upsert(entities_to_index)
+        else:
+            logger.info("No entities found to index.")
+
+        if relationships_to_index:
+            logger.info(f"Indexing {len(relationships_to_index)} relationships.")
+            await self.relationships_vdb.upsert(relationships_to_index)
+        else:
+            logger.info("No relationships found to index.")
+
+        # 4. Finalize the insertion
+        await self._insert_done()
+        logger.info("Vector index build process completed.")
 
     async def aedit_entity(
         self, entity_name: str, updated_data: dict[str, str], allow_rename: bool = True
