@@ -682,43 +682,102 @@ class PGVectorStorage(BaseVectorStorage):
         }
         return upsert_sql, data
 
-    async def upsert(self, data: dict[str, dict[str, Any]]) -> None:
-        logger.debug(f"Inserting {len(data)} to {self.namespace}")
+    async def upsert(self, data: dict[str, dict[str, Any]], build_vector_index: bool = True) -> None:
+        logger.debug(f"Inserting {len(data)} to {self.namespace} with build_vector_index={build_vector_index}")
         if not data:
             return
 
-        # Get current time with UTC timezone
         current_time = datetime.datetime.now(timezone.utc)
         list_data = [
-            {
-                "__id__": k,
-                **{k1: v1 for k1, v1 in v.items()},
-            }
-            for k, v in data.items()
-        ]
-        contents = [v["content"] for v in data.values()]
-        batches = [
-            contents[i : i + self._max_batch_size]
-            for i in range(0, len(contents), self._max_batch_size)
+            {"__id__": k, **v} for k, v in data.items()
         ]
 
-        embedding_tasks = [self.embedding_func(batch) for batch in batches]
-        embeddings_list = await asyncio.gather(*embedding_tasks)
+        if build_vector_index:
+            contents = [v["content"] for v in data.values()]
+            if contents:
+                batches = [
+                    contents[i : i + self._max_batch_size]
+                    for i in range(0, len(contents), self._max_batch_size)
+                ]
+                embedding_tasks = [self.embedding_func(batch) for batch in batches]
+                embeddings_list = await asyncio.gather(*embedding_tasks)
+                embeddings = np.concatenate(embeddings_list)
+                for i, d in enumerate(list_data):
+                    d["__vector__"] = embeddings[i]
 
-        embeddings = np.concatenate(embeddings_list)
-        for i, d in enumerate(list_data):
-            d["__vector__"] = embeddings[i]
         for item in list_data:
+            has_vector = "__vector__" in item
+
             if is_namespace(self.namespace, NameSpace.VECTOR_STORE_CHUNKS):
-                upsert_sql, data = self._upsert_chunks(item, current_time)
+                table_name = "LIGHTRAG_DOC_CHUNKS"
+                base_data = {
+                    "workspace": self.db.workspace,
+                    "id": item["__id__"],
+                    "tokens": item["tokens"],
+                    "chunk_order_index": item["chunk_order_index"],
+                    "full_doc_id": item["full_doc_id"],
+                    "content": item["content"],
+                    "file_path": item["file_path"],
+                    "create_time": current_time,
+                    "update_time": current_time,
+                }
+                update_cols = ["tokens", "chunk_order_index", "full_doc_id", "content", "file_path", "update_time"]
+                if has_vector:
+                    base_data["content_vector"] = json.dumps(item["__vector__"].tolist())
+                    update_cols.append("content_vector")
+
             elif is_namespace(self.namespace, NameSpace.VECTOR_STORE_ENTITIES):
-                upsert_sql, data = self._upsert_entities(item, current_time)
+                table_name = "LIGHTRAG_VDB_ENTITY"
+                source_id = item["source_id"]
+                chunk_ids = source_id.split("<SEP>") if isinstance(source_id, str) and "<SEP>" in source_id else [source_id]
+                base_data = {
+                    "workspace": self.db.workspace,
+                    "id": item["__id__"],
+                    "entity_name": item["entity_name"],
+                    "content": item["content"],
+                    "chunk_ids": chunk_ids,
+                    "file_path": item.get("file_path", None),
+                    "create_time": current_time,
+                    "update_time": current_time,
+                }
+                update_cols = ["entity_name", "content", "chunk_ids", "file_path", "update_time"]
+                if has_vector:
+                    base_data["content_vector"] = json.dumps(item["__vector__"].tolist())
+                    update_cols.append("content_vector")
+
             elif is_namespace(self.namespace, NameSpace.VECTOR_STORE_RELATIONSHIPS):
-                upsert_sql, data = self._upsert_relationships(item, current_time)
+                table_name = "LIGHTRAG_VDB_RELATION"
+                source_id = item["source_id"]
+                chunk_ids = source_id.split("<SEP>") if isinstance(source_id, str) and "<SEP>" in source_id else [source_id]
+                base_data = {
+                    "workspace": self.db.workspace,
+                    "id": item["__id__"],
+                    "source_id": item["src_id"],
+                    "target_id": item["tgt_id"],
+                    "content": item["content"],
+                    "chunk_ids": chunk_ids,
+                    "file_path": item.get("file_path", None),
+                    "create_time": current_time,
+                    "update_time": current_time,
+                }
+                update_cols = ["source_id", "target_id", "content", "chunk_ids", "file_path", "update_time"]
+                if has_vector:
+                    base_data["content_vector"] = json.dumps(item["__vector__"].tolist())
+                    update_cols.append("content_vector")
             else:
                 raise ValueError(f"{self.namespace} is not supported")
 
-            await self.db.execute(upsert_sql, data)
+            cols = list(base_data.keys())
+            placeholders = ", ".join([f"${i+1}" for i in range(len(cols))])
+            update_placeholders = ", ".join([f"{col} = EXCLUDED.{col}" for col in update_cols])
+            
+            upsert_sql = f'''
+INSERT INTO {table_name} ({", ".join(cols)})
+VALUES ({placeholders})
+ON CONFLICT (id, workspace) DO UPDATE SET
+{update_placeholders}
+'''
+            await self.db.execute(upsert_sql, base_data)
 
     #################### query method ###############
     async def query(

@@ -991,13 +991,10 @@ class LightRAG:
                             )
                             tasks.append(doc_status_task)
 
-                            if build_vector_index:
-                                chunks_vdb_task = asyncio.create_task(
-                                    self.chunks_vdb.upsert(chunks)
-                                )
-                                tasks.append(chunks_vdb_task)
-                            else:
-                                chunks_vdb_task = None  # Ensure the variable exists
+                            chunks_vdb_task = asyncio.create_task(
+                                self.chunks_vdb.upsert(chunks, build_vector_index=build_vector_index)
+                            )
+                            tasks.append(chunks_vdb_task)
 
                             entity_relation_task = asyncio.create_task(
                                 self._process_entity_relation_graph(
