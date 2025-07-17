@@ -689,7 +689,11 @@ class PGVectorStorage(BaseVectorStorage):
 
         current_time = datetime.datetime.now(timezone.utc)
         list_data = [
-            {"__id__": k, **v} for k, v in data.items()
+            {
+                "__id__": k,
+                **{k1: v1 for k1, v1 in v.items()},
+            }
+            for k, v in data.items()
         ]
 
         if build_vector_index:

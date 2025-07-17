@@ -188,16 +188,21 @@ class RedisKVStorage(BaseKVStorage):
         await self.close()
 
 
-    async def get_all(self) -> list[dict[str, Any]]:
+    async def get_all(self, prefix:str="") -> list[dict[str, Any]]:
         """
           text_chunks:chunk-048c3eaf45947f4b3488c4f3312743fe
           从redis中获取所有数据，其中 key为text_chunks开头，结构示例为text_chunks:chunk-048c3eaf45947f4b3488c4f3312743fe）
+
+          prefix:
+             ""/default,  list all the data in redis
+             "doc_id"/chunk_id list, 基于doc_id检索chunk list
+             "chunk" : 基于chunk id检索chunk内容
         Returns:
         """
         logger.info(f"Getting all data in text chunks from {self.namespace}")
         async with self._get_redis_connection() as redis:
             try:
-                keys = await redis.keys(f"{self.namespace}:*")
+                keys = await redis.keys(f"{self.namespace}:{prefix}*")
                 if not keys:
                     logger.warn(f"未找到text_chunks开头的键: {self.namespace}")
                     return []

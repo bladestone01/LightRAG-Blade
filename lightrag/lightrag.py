@@ -2021,7 +2021,8 @@ class LightRAG:
 
         # 1. Index all chunks
         # We assume text_chunks KV store has a get_all method
-        all_chunks = await self.text_chunks.get_all()
+        # 检索chunk list
+        all_chunks = await self.text_chunks.get_all("chunk")
         if all_chunks:
             logger.info(f"Indexing {len(all_chunks)} text chunks.")
             await self.chunks_vdb.upsert(all_chunks)
