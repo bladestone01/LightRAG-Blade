@@ -1448,19 +1448,27 @@ class LightRAG:
         Args:
             query (str): The query to be executed.
             param (QueryParam): Configuration parameters for query execution.
-                If param.model_func is provided, it will be used instead of the global model.
-            prompt (Optional[str]): Custom prompts for fine-tuned control over the system's behavior. Defaults to None, which uses PROMPTS["rag_response"].
+            system_prompt (Optional[str]): Custom prompts for fine-tuned control over the system's behavior.
 
         Returns:
-            str: The result of the query execution.
+            str | AsyncIterator[str]: The result of the query execution, either as a full string or an async iterator for streaming.
         """
-        # If a custom model is provided in param, temporarily update global config
         global_config = asdict(self)
-        # Save original query for vector search
         param.original_query = query
 
+        # 定义一个内部包装器来处理流和资源清理
+        async def _aquery_stream_wrapper(iterator: AsyncIterator[str]) -> AsyncIterator[str]:
+            """Wraps the stream to ensure cleanup is called."""
+            try:
+                async for chunk in iterator:
+                    yield chunk
+            finally:
+                await self._query_done()
+
+        # 根据模式选择正确的查询函数
+        query_iterator: str | AsyncIterator[str] | None = None
         if param.mode in ["local", "global", "hybrid", "mix"]:
-            response = await kg_query(
+            query_iterator = await kg_query(
                 query.strip(),
                 self.chunk_entity_relation_graph,
                 self.entities_vdb,
@@ -1473,7 +1481,7 @@ class LightRAG:
                 chunks_vdb=self.chunks_vdb,
             )
         elif param.mode == "naive":
-            response = await naive_query(
+            query_iterator = await naive_query(
                 query.strip(),
                 self.chunks_vdb,
                 param,
@@ -1482,22 +1490,35 @@ class LightRAG:
                 system_prompt=system_prompt,
             )
         elif param.mode == "bypass":
-            # Bypass mode: directly use LLM without knowledge retrieval
             use_llm_func = param.model_func or global_config["llm_model_func"]
-            # Apply higher priority (8) to entity/relation summary tasks
             use_llm_func = partial(use_llm_func, _priority=8)
+            
+            # 确保 stream 参数被正确设置, 为None情况下，将其设置为False
+            if param.stream is None:
+                param.stream = False
+            is_streaming = param.stream
 
-            param.stream = True if param.stream is None else param.stream
-            response = await use_llm_func(
+            query_iterator = await use_llm_func(
                 query.strip(),
                 system_prompt=system_prompt,
                 history_messages=param.conversation_history,
-                stream=param.stream,
+                stream=is_streaming,
             )
         else:
             raise ValueError(f"Unknown mode {param.mode}")
-        await self._query_done()
-        return response
+
+        # 根据是否为流式决定如何返回
+        if isinstance(query_iterator, AsyncIterator):
+            # 如果是流，返回包装后的迭代器以确保清理
+            return _aquery_stream_wrapper(query_iterator)
+        elif isinstance(query_iterator, str):
+            # 如果是字符串，直接清理并返回
+            await self._query_done()
+            return query_iterator
+        else:
+            # 处理未知返回类型
+            await self._query_done()
+            raise TypeError(f"Expected str or AsyncIterator, but got {type(query_iterator)}")
 
     # TODO: Deprecated, use user_prompt in QueryParam instead
     def query_with_separate_keyword_extraction(
