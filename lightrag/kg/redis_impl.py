@@ -2,7 +2,7 @@ import asyncio
 import os
 import time
 import traceback
-from typing import Any, final
+from typing import Any, final, AsyncIterator
 from dataclasses import dataclass
 import pipmaster as pm
 import configparser
@@ -211,7 +211,7 @@ class RedisKVStorage(BaseKVStorage):
         """
         DEPRECATED: This method can cause memory issues with large datasets. Use get_all_iter instead.
         """
-        warnings.warn(
+        logger.warn(
             "The get_all method is deprecated and can cause memory issues. Use get_all_iter instead.",
             DeprecationWarning
         )
