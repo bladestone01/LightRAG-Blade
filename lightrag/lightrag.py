@@ -252,6 +252,11 @@ class LightRAG:
     max_parallel_insert: int = field(default=int(os.getenv("MAX_PARALLEL_INSERT", 2)))
     """Maximum number of parallel insert operations."""
 
+    processing_batch_size: int = field(
+        default=int(os.getenv("PROCESSING_BATCH_SIZE", 100))
+    )
+    """Number of documents to process in a single batch."""
+
     addon_params: dict[str, Any] = field(
         default_factory=lambda: {
             "language": get_env_value("SUMMARY_LANGUAGE", "English", str)
@@ -828,7 +833,7 @@ class LightRAG:
         each chunk for entity and relation extraction, and updating the
         document status.
 
-        1. Get all pending, failed, and abnormally terminated processing documents.
+        1. Get all pending, failed, and abnormally terminated processing documents in batches.
         2. Split document content into chunks
         3. Process each chunk for entity and relation extraction
         4. Update the document status
@@ -840,12 +845,41 @@ class LightRAG:
 
         # Check if another process is already processing the queue
         async with pipeline_status_lock:
-            # Ensure only one worker is processing documents
-            if not pipeline_status.get("busy", False):
+            if pipeline_status.get("busy", False):
+                pipeline_status["request_pending"] = True
+                logger.info(
+                    "Another process is already processing the document queue. Request queued."
+                )
+                return
+
+            pipeline_status.update(
+                {
+                    "busy": True,
+                    "job_name": "Default Job",
+                    "job_start": datetime.now(timezone.utc).isoformat(),
+                    "docs": 0,
+                    "batchs": 0,
+                    "cur_batch": 0,
+                    "request_pending": False,
+                    "latest_message": "",
+                }
+            )
+            del pipeline_status["history_messages"][:]
+
+        try:
+            total_processed_files = 0
+            while True:
+                # Fetch a batch of documents to process
                 processing_docs, failed_docs, pending_docs = await asyncio.gather(
-                    self.doc_status.get_docs_by_status(DocStatus.PROCESSING),
-                    self.doc_status.get_docs_by_status(DocStatus.FAILED),
-                    self.doc_status.get_docs_by_status(DocStatus.PENDING),
+                    self.doc_status.get_docs_by_status(
+                        DocStatus.PROCESSING, limit=self.processing_batch_size
+                    ),
+                    self.doc_status.get_docs_by_status(
+                        DocStatus.FAILED, limit=self.processing_batch_size
+                    ),
+                    self.doc_status.get_docs_by_status(
+                        DocStatus.PENDING, limit=self.processing_batch_size
+                    ),
                 )
 
                 to_process_docs: dict[str, DocProcessingStatus] = {}
@@ -854,96 +888,67 @@ class LightRAG:
                 to_process_docs.update(pending_docs)
 
                 if not to_process_docs:
-                    logger.info("No documents to process")
-                    return
-
-                pipeline_status.update(
-                    {
-                        "busy": True,
-                        "job_name": "Default Job",
-                        "job_start": datetime.now(timezone.utc).isoformat(),
-                        "docs": 0,
-                        "batchs": 0,  # Total number of files to be processed
-                        "cur_batch": 0,  # Number of files already processed
-                        "request_pending": False,  # Clear any previous request
-                        "latest_message": "",
-                    }
-                )
-                # Cleaning history_messages without breaking it as a shared list object
-                del pipeline_status["history_messages"][:]
-            else:
-                # Another process is busy, just set request flag and return
-                pipeline_status["request_pending"] = True
-                logger.info(
-                    "Another process is already processing the document queue. Request queued."
-                )
-                return
-
-        try:
-            # Process documents until no more documents or requests
-            while True:
-                if not to_process_docs:
-                    log_message = "All documents have been processed or are duplicates"
+                    async with pipeline_status_lock:
+                        has_pending_request = pipeline_status.get(
+                            "request_pending", False
+                        )
+                        if has_pending_request:
+                            pipeline_status["request_pending"] = False
+                            # Continue the loop to check for newly enqueued documents
+                            continue
+                    log_message = "All documents have been processed."
                     logger.info(log_message)
                     pipeline_status["latest_message"] = log_message
                     pipeline_status["history_messages"].append(log_message)
                     break
 
-                log_message = f"Processing {len(to_process_docs)} document(s)"
+                log_message = f"Processing a batch of {len(to_process_docs)} document(s)"
                 logger.info(log_message)
 
-                # Update pipeline_status, batchs now represents the total number of files to be processed
-                pipeline_status["docs"] = len(to_process_docs)
-                pipeline_status["batchs"] = len(to_process_docs)
-                pipeline_status["cur_batch"] = 0
-                pipeline_status["latest_message"] = log_message
-                pipeline_status["history_messages"].append(log_message)
+                async with pipeline_status_lock:
+                    pipeline_status["docs"] += len(to_process_docs)
+                    pipeline_status["batchs"] = len(to_process_docs)
+                    pipeline_status["cur_batch"] = 0
+                    pipeline_status["latest_message"] = log_message
+                    pipeline_status["history_messages"].append(log_message)
 
-                # Get first document's file path and total count for job name
-                first_doc_id, first_doc = next(iter(to_process_docs.items()))
-                first_doc_path = first_doc.file_path
-                path_prefix = first_doc_path[:20] + (
-                    "..." if len(first_doc_path) > 20 else ""
-                )
-                total_files = len(to_process_docs)
-                job_name = f"{path_prefix}[{total_files} files]"
-                pipeline_status["job_name"] = job_name
+                    first_doc_path = next(iter(to_process_docs.values())).file_path
+                    path_prefix = (
+                        first_doc_path[:20] + "..."
+                        if len(first_doc_path) > 20
+                        else first_doc_path
+                    )
+                    job_name = f"{path_prefix}[{len(to_process_docs)} files]"
+                    pipeline_status["job_name"] = job_name
 
-                # Create a counter to track the number of processed files
-                processed_count = 0
-                # Create a semaphore to limit the number of concurrent file processing
                 semaphore = asyncio.Semaphore(self.max_parallel_insert)
+                batch_processed_count = 0
 
                 async def process_document(
                     doc_id: str,
                     status_doc: DocProcessingStatus,
                     split_by_character: str | None,
                     split_by_character_only: bool,
-                    build_vector_index: bool,  # Pass the flag here
+                    build_vector_index: bool,
                     pipeline_status: dict,
                     pipeline_status_lock: asyncio.Lock,
                     semaphore: asyncio.Semaphore,
                 ) -> None:
-                    """Process single document"""
+                    nonlocal batch_processed_count, total_processed_files
                     file_extraction_stage_ok = False
                     async with semaphore:
-                        nonlocal processed_count
-                        current_file_number = 0
+                        current_file_number_in_batch = 0
                         try:
-                            # Get file path from status document
                             file_path = getattr(
                                 status_doc, "file_path", "unknown_source"
                             )
-
                             async with pipeline_status_lock:
-                                # Update processed file count and save current file number
-                                processed_count += 1
-                                current_file_number = (
-                                    processed_count  # Save the current file number
-                                )
-                                pipeline_status["cur_batch"] = processed_count
+                                batch_processed_count += 1
+                                total_processed_files += 1
+                                current_file_number_in_batch = batch_processed_count
+                                pipeline_status["cur_batch"] = total_processed_files
 
-                                log_message = f"Extracting stage {current_file_number}/{total_files}: {file_path}"
+                                log_message = f"Extracting stage {total_processed_files}: {file_path}"
                                 logger.info(log_message)
                                 pipeline_status["history_messages"].append(log_message)
                                 log_message = f"Processing d-id: {doc_id}"
@@ -951,12 +956,11 @@ class LightRAG:
                                 pipeline_status["latest_message"] = log_message
                                 pipeline_status["history_messages"].append(log_message)
 
-                            # Generate chunks from document
                             chunks: dict[str, Any] = {
                                 compute_mdhash_id(dp["content"], prefix="chunk-"): {
                                     **dp,
                                     "full_doc_id": doc_id,
-                                    "file_path": file_path,  # Add file path to each chunk
+                                    "file_path": file_path,
                                 }
                                 for dp in self.chunking_func(
                                     self.tokenizer,
@@ -967,10 +971,7 @@ class LightRAG:
                                     self.chunk_token_size,
                                 )
                             }
-
-                            # Process document (text chunks and full docs) in parallel
                             tasks = []
-                            # Create tasks with references for potential cancellation
                             doc_status_task = asyncio.create_task(
                                 self.doc_status.upsert(
                                     {
@@ -990,38 +991,33 @@ class LightRAG:
                                 )
                             )
                             tasks.append(doc_status_task)
-
                             chunks_vdb_task = asyncio.create_task(
-                                self.chunks_vdb.upsert(chunks, build_vector_index=build_vector_index)
+                                self.chunks_vdb.upsert(
+                                    chunks, build_vector_index=build_vector_index
+                                )
                             )
                             tasks.append(chunks_vdb_task)
-
                             entity_relation_task = asyncio.create_task(
                                 self._process_entity_relation_graph(
                                     chunks, pipeline_status, pipeline_status_lock
                                 )
                             )
                             tasks.append(entity_relation_task)
-
                             full_docs_task = asyncio.create_task(
                                 self.full_docs.upsert(
                                     {doc_id: {"content": status_doc.content}}
                                 )
                             )
                             tasks.append(full_docs_task)
-
                             text_chunks_task = asyncio.create_task(
                                 self.text_chunks.upsert(chunks)
                             )
                             tasks.append(text_chunks_task)
-
                             await asyncio.gather(*tasks)
                             file_extraction_stage_ok = True
-
                         except Exception as e:
-                            # Log error and update pipeline status
                             logger.error(traceback.format_exc())
-                            error_msg = f"Failed to extrat document {current_file_number}/{total_files}: {file_path}"
+                            error_msg = f"Failed to extract document {total_processed_files}: {file_path}"
                             logger.error(error_msg)
                             async with pipeline_status_lock:
                                 pipeline_status["latest_message"] = error_msg
@@ -1029,21 +1025,8 @@ class LightRAG:
                                     traceback.format_exc()
                                 )
                                 pipeline_status["history_messages"].append(error_msg)
-
-                                # Cancel other tasks as they are no longer meaningful
-                                non_vdb_tasks = [entity_relation_task, full_docs_task, text_chunks_task]
-                                if chunks_vdb_task:
-                                    non_vdb_tasks.append(chunks_vdb_task)
-
-                                for task in non_vdb_tasks:
-                                    if not task.done():
-                                        task.cancel()
-
-                            # Persistent llm cache
                             if self.llm_response_cache:
                                 await self.llm_response_cache.index_done_callback()
-
-                            # Update document status to failed
                             await self.doc_status.upsert(
                                 {
                                     doc_id: {
@@ -1061,14 +1044,11 @@ class LightRAG:
                                 }
                             )
 
-                    # Semphore released, concurrency controlled by graph_db_lock in merge_nodes_and_edges instead
-
                     if file_extraction_stage_ok:
                         try:
-                            # Get chunk_results from entity_relation_task
                             chunk_results = await entity_relation_task
                             await merge_nodes_and_edges(
-                                chunk_results=chunk_results,  # result collected from entity_relation_task
+                                chunk_results=chunk_results,
                                 knowledge_graph_inst=self.chunk_entity_relation_graph,
                                 entity_vdb=self.entities_vdb,
                                 relationships_vdb=self.relationships_vdb,
@@ -1076,12 +1056,11 @@ class LightRAG:
                                 pipeline_status=pipeline_status,
                                 pipeline_status_lock=pipeline_status_lock,
                                 llm_response_cache=self.llm_response_cache,
-                                current_file_number=current_file_number,
-                                total_files=total_files,
+                                current_file_number=total_processed_files,
+                                total_files=pipeline_status["docs"],
                                 file_path=file_path,
-                                build_vector_index=build_vector_index,  # Pass the flag here
+                                build_vector_index=build_vector_index,
                             )
-
                             await self.doc_status.upsert(
                                 {
                                     doc_id: {
@@ -1098,20 +1077,14 @@ class LightRAG:
                                     }
                                 }
                             )
-
-                            # Call _insert_done after processing each file
-                            await self._insert_done()
-
                             async with pipeline_status_lock:
-                                log_message = f"Completed processing file {current_file_number}/{total_files}: {file_path}"
+                                log_message = f"Completed processing file {total_processed_files}: {file_path}"
                                 logger.info(log_message)
                                 pipeline_status["latest_message"] = log_message
                                 pipeline_status["history_messages"].append(log_message)
-
                         except Exception as e:
-                            # Log error and update pipeline status
                             logger.error(traceback.format_exc())
-                            error_msg = f"Merging stage failed in document {current_file_number}/{total_files}: {file_path}"
+                            error_msg = f"Merging stage failed in document {total_processed_files}: {file_path}"
                             logger.error(error_msg)
                             async with pipeline_status_lock:
                                 pipeline_status["latest_message"] = error_msg
@@ -1119,12 +1092,8 @@ class LightRAG:
                                     traceback.format_exc()
                                 )
                                 pipeline_status["history_messages"].append(error_msg)
-
-                            # Persistent llm cache
                             if self.llm_response_cache:
                                 await self.llm_response_cache.index_done_callback()
-
-                            # Update document status to failed
                             await self.doc_status.upsert(
                                 {
                                     doc_id: {
@@ -1140,57 +1109,30 @@ class LightRAG:
                                 }
                             )
 
-                # Create processing tasks for all documents
-                doc_tasks = []
-                for doc_id, status_doc in to_process_docs.items():
-                    doc_tasks.append(
-                        process_document(
-                            doc_id,
-                            status_doc,
-                            split_by_character,
-                            split_by_character_only,
-                            build_vector_index,  # Pass the flag here
-                            pipeline_status,
-                            pipeline_status_lock,
-                            semaphore,
-                        )
+                doc_tasks = [
+                    process_document(
+                        doc_id,
+                        status_doc,
+                        split_by_character,
+                        split_by_character_only,
+                        build_vector_index,
+                        pipeline_status,
+                        pipeline_status_lock,
+                        semaphore,
                     )
-
-                # Wait for all document processing to complete
+                    for doc_id, status_doc in to_process_docs.items()
+                ]
                 await asyncio.gather(*doc_tasks)
 
-                # Check if there's a pending request to process more documents (with lock)
-                has_pending_request = False
-                async with pipeline_status_lock:
-                    has_pending_request = pipeline_status.get("request_pending", False)
-                    if has_pending_request:
-                        # Clear the request flag before checking for more documents
-                        pipeline_status["request_pending"] = False
-
-                if not has_pending_request:
-                    break
-
-                log_message = "Processing additional documents due to pending request"
-                logger.info(log_message)
-                pipeline_status["latest_message"] = log_message
-                pipeline_status["history_messages"].append(log_message)
-
-                # Check for pending documents again
-                processing_docs, failed_docs, pending_docs = await asyncio.gather(
-                    self.doc_status.get_docs_by_status(DocStatus.PROCESSING),
-                    self.doc_status.get_docs_by_status(DocStatus.FAILED),
-                    self.doc_status.get_docs_by_status(DocStatus.PENDING),
-                )
-
-                to_process_docs = {}
-                to_process_docs.update(processing_docs)
-                to_process_docs.update(failed_docs)
-                to_process_docs.update(pending_docs)
+            # Call _insert_done once after all batches are processed
+            await self._insert_done(
+                pipeline_status=pipeline_status,
+                pipeline_status_lock=pipeline_status_lock,
+            )
 
         finally:
             log_message = "Document processing pipeline completed"
             logger.info(log_message)
-            # Always reset busy status when done or if an exception occurs (with lock)
             async with pipeline_status_lock:
                 pipeline_status["busy"] = False
                 pipeline_status["latest_message"] = log_message
@@ -2040,82 +1982,59 @@ class LightRAG:
         """
         logger.info("Starting to build vector index for all data.")
 
-        # 1. Index all chunks
-        # We assume text_chunks KV store has a get_all method
-        # 检索chunk list
-        all_chunks = await self.text_chunks.get_all("chunk")
-        if all_chunks:
-            logger.info(f"Indexing {len(all_chunks)} text chunks.")
-            await self.chunks_vdb.upsert(all_chunks)
-        else:
-            logger.info("No text chunks found to index.")
+        # 1. Index all chunks using the iterator
+        logger.info("Indexing text chunks...")
+        batch_size = self.processing_batch_size
+        async for batch in self.text_chunks.get_all_iter("chunk", batch_size=batch_size):
+            await self.chunks_vdb.upsert(batch)
+            logger.info(f"Indexed a batch of {len(batch)} chunks.")
 
         # 2. Index all entities and relationships from the graph
-        all_labels = await self.chunk_entity_relation_graph.get_all_labels()
-        if not all_labels:
-            logger.info("No entities or relationships found in the graph to index.")
-            await self._insert_done()
-            return
+        logger.info("Indexing entities and relationships from the graph...")
+        batch_size = self.processing_batch_size
+        async for label_batch in self.chunk_entity_relation_graph.get_all_labels_iter(batch_size=batch_size):
+            if not label_batch:
+                continue
+            logger.info(f"Processing a batch of {len(label_batch)} graph labels.")
 
-        logger.info(f"Found {len(all_labels)} entity labels to process.")
-        entities_to_index = {}
-        relationships_to_index = {}
+            # Get nodes and edges for the current batch of labels
+            nodes_batch = await self.chunk_entity_relation_graph.get_nodes_batch(label_batch)
+            edges_batch = await self.chunk_entity_relation_graph.get_edges_batch(
+                [{'src': src, 'tgt': tgt} for src, tgt in await self.chunk_entity_relation_graph.get_nodes_edges_batch(label_batch)]
+            )
 
-        for label in all_labels:
-            node_data = await self.chunk_entity_relation_graph.get_node(label)
-            if node_data:
-                entity_name = node_data.get("entity_name") or label
-                description = node_data.get("description", "")
-                source_id = node_data.get("source_id", "")
-                entity_type = node_data.get("entity_type", "UNKNOWN")
-                file_path = node_data.get("file_path", "unknown_source")
+            entities_to_index = {}
+            relationships_to_index = {}
 
-                entities_to_index[compute_mdhash_id(entity_name, prefix="ent-")] = {
-                    "content": f"{entity_name}\n{description}",
-                    "entity_name": entity_name,
-                    "source_id": source_id,
-                    "description": description,
-                    "entity_type": entity_type,
-                    "file_path": file_path,
+            for node_id, node_data in nodes_batch.items():
+                entities_to_index[compute_mdhash_id(node_id, prefix="ent-")] = {
+                    "content": node_id + "\n" + node_data.get("description", ""),
+                    "entity_name": node_id,
+                    "source_id": node_data.get("source_id", ""),
+                    "description": node_data.get("description", ""),
+                    "entity_type": node_data.get("entity_type", ""),
+                    "file_path": node_data.get("file_path", ""),
                 }
 
-            node_edges = await self.chunk_entity_relation_graph.get_node_edges(label)
-            if node_edges:
-                for src, tgt in node_edges:
-                    edge_data = await self.chunk_entity_relation_graph.get_edge(src, tgt)
-                    if edge_data:
-                        description = edge_data.get("description", "")
-                        keywords = edge_data.get("keywords", "")
-                        source_id = edge_data.get("source_id", "")
-                        weight = edge_data.get("weight", 1.0)
-                        file_path = edge_data.get("file_path", "unknown_source")
+            for (src, tgt), edge_data in edges_batch.items():
+                relationships_to_index[compute_mdhash_id(src + tgt, prefix="rel-")] = {
+                    "src_id": src,
+                    "tgt_id": tgt,
+                    "source_id": edge_data.get("source_id", ""),
+                    "content": f"{edge_data.get('keywords', '')}\t{src}\n{tgt}\n{edge_data.get('description', '')}",
+                    "keywords": edge_data.get("keywords", ""),
+                    "description": edge_data.get("description", ""),
+                    "weight": edge_data.get("weight", 1.0),
+                    "file_path": edge_data.get("file_path", ""),
+                }
 
-                        relationships_to_index[compute_mdhash_id(src + tgt, prefix="rel-")] = {
-                            "src_id": src,
-                            "tgt_id": tgt,
-                            "source_id": source_id,
-                            "content": f"{keywords}\t{src}\n{tgt}\n{description}",
-                            "keywords": keywords,
-                            "description": description,
-                            "weight": weight,
-                            "file_path": file_path,
-                        }
+            if entities_to_index:
+                await self.entities_vdb.upsert(entities_to_index)
+            if relationships_to_index:
+                await self.relationships_vdb.upsert(relationships_to_index)
 
-        if entities_to_index:
-            logger.info(f"Indexing {len(entities_to_index)} entities.")
-            await self.entities_vdb.upsert(entities_to_index)
-        else:
-            logger.info("No entities found to index.")
-
-        if relationships_to_index:
-            logger.info(f"Indexing {len(relationships_to_index)} relationships.")
-            await self.relationships_vdb.upsert(relationships_to_index)
-        else:
-            logger.info("No relationships found to index.")
-
-        # 4. Finalize the insertion
+        logger.info("Finished building vector index for all data.")
         await self._insert_done()
-        logger.info("Vector index build process completed.")
 
     async def aedit_entity(
         self, entity_name: str, updated_data: dict[str, str], allow_rename: bool = True

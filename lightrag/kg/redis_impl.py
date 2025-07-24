@@ -187,42 +187,39 @@ class RedisKVStorage(BaseKVStorage):
         """Ensure Redis resources are cleaned up when exiting context."""
         await self.close()
 
+    async def get_all_iter(self, prefix: str = "", batch_size: int = 100) -> AsyncIterator[dict]:
+        """Yield all data from storage in batches, for a given prefix."""
+        logger.info(f"Streaming all data in text chunks from {self.namespace} with prefix '{prefix}'")
+        async with self._get_redis_connection() as redis:
+            batch = {}
+            try:
+                async for key in redis.scan_iter(f"{self.namespace}:{prefix}*"):
+                    value = await redis.get(key)
+                    if value:
+                        batch[key.split(":")[-1]] = json.loads(value)
+                        if len(batch) >= batch_size:
+                            yield batch
+                            batch = {}
+                if batch:
+                    yield batch
+            except json.JSONDecodeError as e:
+                logger.error(f"JSON decode error during iteration: {e}")
+            except Exception as e:
+                logger.error(f"Error during data iteration: {e}")
 
     async def get_all(self, prefix:str="") -> list[dict[str, Any]]:
         """
-          text_chunks:chunk-048c3eaf45947f4b3488c4f3312743fe
-          从redis中获取所有数据，其中 key为text_chunks开头，结构示例为text_chunks:chunk-048c3eaf45947f4b3488c4f3312743fe）
-
-          prefix:
-             ""/default,  list all the data in redis
-             "doc_id"/chunk_id list, 基于doc_id检索chunk list
-             "chunk" : 基于chunk id检索chunk内容
-        Returns:
+        DEPRECATED: This method can cause memory issues with large datasets. Use get_all_iter instead.
         """
+        warnings.warn(
+            "The get_all method is deprecated and can cause memory issues. Use get_all_iter instead.",
+            DeprecationWarning
+        )
         logger.info(f"Getting all data in text chunks from {self.namespace}")
-        async with self._get_redis_connection() as redis:
-            try:
-                keys = await redis.keys(f"{self.namespace}:{prefix}*")
-                if not keys:
-                    logger.warn(f"未找到text_chunks开头的键: {self.namespace}")
-                    return []
-
-                pipe = redis.pipeline()
-                for key in keys:
-                    pipe.get(key)
-                results = await pipe.execute()
-
-                return {
-                    key.split(":")[-1]: json.loads(result)
-                    for key, result in zip(keys, results)
-                    if result
-                }
-            except json.JSONDecodeError as e:
-                logger.error(f"JSON解析错误: {e}")
-                return []
-            except Exception as e:
-                logger.error(f"获取所有数据时发生错误: {e}")
-                return []
+        all_data = {}
+        async for batch in self.get_all_iter(prefix=prefix):
+            all_data.update(batch)
+        return all_data
 
     async def get_by_id(self, id: str) -> dict[str, Any] | None:
         async with self._get_redis_connection() as redis:

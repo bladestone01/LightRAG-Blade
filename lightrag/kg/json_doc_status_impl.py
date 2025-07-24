@@ -74,11 +74,12 @@ class JsonDocStatusStorage(DocStatusStorage):
         return counts
 
     async def get_docs_by_status(
-        self, status: DocStatus
+        self, status: DocStatus, limit: int | None = None
     ) -> dict[str, DocProcessingStatus]:
         """Get all documents with a specific status"""
         result = {}
         async with self._storage_lock:
+            count = 0
             for k, v in self._data.items():
                 if v["status"] == status.value:
                     try:
@@ -91,6 +92,10 @@ class JsonDocStatusStorage(DocStatusStorage):
                         if "file_path" not in data:
                             data["file_path"] = "no-file-path"
                         result[k] = DocProcessingStatus(**data)
+                        if limit is not None:
+                            count += 1
+                            if count >= limit:
+                                break
                     except KeyError as e:
                         logger.error(f"Missing required field for document {k}: {e}")
                         continue

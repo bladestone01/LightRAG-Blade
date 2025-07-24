@@ -2,7 +2,7 @@ import inspect
 import os
 import re
 from dataclasses import dataclass
-from typing import final
+from typing import final, AsyncIterator
 import configparser
 
 
@@ -1202,35 +1202,43 @@ class Neo4JStorage(BaseGraphStorage):
         )
         return result
 
+    async def get_all_labels_iter(self, batch_size: int = 1000) -> AsyncIterator[list[str]]:
+        """Yield all labels from the graph in batches."""
+        async with self._driver.session(
+            database=self._DATABASE, default_access_mode="READ"
+        ) as session:
+            skip = 0
+            while True:
+                query = f"""
+                MATCH (n:base)
+                WHERE n.entity_id IS NOT NULL
+                RETURN DISTINCT n.entity_id AS label
+                ORDER BY label
+                SKIP {skip}
+                LIMIT {batch_size}
+                """
+                result = await session.run(query)
+                batch = [record["label"] async for record in result]
+                if not batch:
+                    break
+                yield batch
+                skip += batch_size
+
     async def get_all_labels(self) -> list[str]:
         """
+        DEPRECATED: This method can cause memory issues with large datasets. Use get_all_labels_iter instead.
         Get all existing node labels in the database
         Returns:
             ["Person", "Company", ...]  # Alphabetically sorted label list
         """
-        async with self._driver.session(
-            database=self._DATABASE, default_access_mode="READ"
-        ) as session:
-            # Method 1: Direct metadata query (Available for Neo4j 4.3+)
-            # query = "CALL db.labels() YIELD label RETURN label"
-
-            # Method 2: Query compatible with older versions
-            query = """
-            MATCH (n:base)
-            WHERE n.entity_id IS NOT NULL
-            RETURN DISTINCT n.entity_id AS label
-            ORDER BY label
-            """
-            result = await session.run(query)
-            labels = []
-            try:
-                async for record in result:
-                    labels.append(record["label"])
-            finally:
-                await (
-                    result.consume()
-                )  # Ensure results are consumed even if processing fails
-            return labels
+        logger.warn(
+            "The get_all_labels method is deprecated and can cause memory issues. Use get_all_labels_iter instead.",
+            DeprecationWarning
+        )
+        all_labels = []
+        async for batch in self.get_all_labels_iter():
+            all_labels.extend(batch)
+        return all_labels
 
     @retry(
         stop=stop_after_attempt(3),

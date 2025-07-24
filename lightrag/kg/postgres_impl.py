@@ -1226,11 +1226,15 @@ class PGDocStatusStorage(DocStatusStorage):
         return counts
 
     async def get_docs_by_status(
-        self, status: DocStatus
+        self, status: DocStatus, limit: int | None = None
     ) -> dict[str, DocProcessingStatus]:
         """all documents with a specific status"""
         sql = "select * from LIGHTRAG_DOC_STATUS where workspace=$1 and status=$2"
         params = {"workspace": self.db.workspace, "status": status.value}
+        if limit is not None:
+            sql += f" LIMIT ${len(params) + 1}"
+            params["limit"] = limit
+
         result = await self.db.query(sql, params, True)
         docs_by_status = {
             element["id"]: DocProcessingStatus(

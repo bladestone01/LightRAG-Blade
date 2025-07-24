@@ -10,7 +10,7 @@ from typing import (
     Literal,
     TypedDict,
     TypeVar,
-    Callable,
+    Callable, AsyncIterator,
 )
 from .utils import EmbeddingFunc
 from .types import KnowledgeGraph
@@ -283,6 +283,10 @@ class BaseKVStorage(StorageNameSpace, ABC):
         """
         pass
 
+    async def get_all_iter(self, prefix: str, batch_size: int) -> AsyncIterator[dict]:
+        """Yield all data from storage in batches, for a given prefix."""
+        yield {}
+
 
     async def drop_cache_by_modes(self, modes: list[str] | None = None) -> bool:
         """Delete specific records from storage by cache mode
@@ -540,6 +544,10 @@ class BaseGraphStorage(StorageNameSpace, ABC):
             A list of all node labels in the graph, sorted alphabetically
         """
 
+    async def get_all_labels_iter(self, batch_size: int = 1000) -> AsyncIterator[list[str]]:
+        """Yield all labels from the graph in batches."""
+        yield []
+
     @abstractmethod
     async def get_knowledge_graph(
         self, node_label: str, max_depth: int = 3, max_nodes: int = 1000
@@ -603,7 +611,7 @@ class DocStatusStorage(BaseKVStorage, ABC):
 
     @abstractmethod
     async def get_docs_by_status(
-        self, status: DocStatus
+        self, status: DocStatus, limit: int | None = None
     ) -> dict[str, DocProcessingStatus]:
         """Get all documents with a specific status"""
 
