@@ -1690,59 +1690,32 @@ class LightRAG:
 
             # Process entities - use storage-agnostic methods
             logger.info(f"Processing entities by doc_id: {doc_id}")
-            all_labels = await self.chunk_entity_relation_graph.get_all_labels()
-            logger.debug(f"Found {len(all_labels)} labels in document id:{doc_id}")
-            for node_label in all_labels:
-                node_data = await self.chunk_entity_relation_graph.get_node(node_label)
-                logger.debug(f"Got node data in label:{node_label}: {node_data and 'source_id' in node_data}")
-                if node_data and "source_id" in node_data:
-                    # Split source_id using GRAPH_FIELD_SEP
-                    sources = set(node_data["source_id"].split(GRAPH_FIELD_SEP))
-                    logger.debug(f"Raw Source, entity labels: {node_label},sources: {sources}")
-                    sources.difference_update(chunk_ids)
-                    logger.debug(f"After difference update, sources: {sources}, status: {not sources}")
-                    if not sources:
-                        entities_to_delete.add(node_label)
-                        logger.debug(
-                            f"Entity {node_label} marked for deletion - no remaining sources"
-                        )
-                    else:
-                        new_source_id = GRAPH_FIELD_SEP.join(sources)
-                        entities_to_update[node_label] = new_source_id
-                        logger.debug(
-                            f"Entity {node_label} will be updated with new source_id: {new_source_id}"
-                        )
+            async for label_batch in self.chunk_entity_relation_graph.get_all_labels_iter():
+                for node_label in label_batch:
+                    node_data = await self.chunk_entity_relation_graph.get_node(node_label)
+                    if node_data and "source_id" in node_data:
+                        sources = set(node_data["source_id"].split(GRAPH_FIELD_SEP))
+                        sources.difference_update(chunk_ids)
+                        if not sources:
+                            entities_to_delete.add(node_label)
+                        else:
+                            entities_to_update[node_label] = GRAPH_FIELD_SEP.join(sources)
 
             # Process relationships
             logger.info(f"Processing relationships by doc_id: {doc_id}")
-            for node_label in all_labels:
-                node_edges = await self.chunk_entity_relation_graph.get_node_edges(
-                    node_label
-                )
-                logger.debug(f"Got node edges in label:{node_label}: len: len{node_edges}")
-                if node_edges:
-                    for src, tgt in node_edges:
-                        edge_data = await self.chunk_entity_relation_graph.get_edge(
-                            src, tgt
-                        )
-                        logger.debug(f"Got edge data in label:{node_label}:{edge_data}: {edge_data and 'source_id' in edge_data}")
-                        if edge_data and "source_id" in edge_data:
-                            # Split source_id using GRAPH_FIELD_SEP
-                            sources = set(edge_data["source_id"].split(GRAPH_FIELD_SEP))
-                            logger.debug(f"Raw Source, relationships labels: {node_label},sources: {sources}")
-                            sources.difference_update(chunk_ids)
-                            logger.debug(f"After relationships difference update, sources: {sources}, status: {not sources}")
-                            if not sources:
-                                relationships_to_delete.add((src, tgt))
-                                logger.debug(
-                                    f"Relationship {src}-{tgt} marked for deletion - no remaining sources"
-                                )
-                            else:
-                                new_source_id = GRAPH_FIELD_SEP.join(sources)
-                                relationships_to_update[(src, tgt)] = new_source_id
-                                logger.debug(
-                                    f"Relationship {src}-{tgt} will be updated with new source_id: {new_source_id}"
-                                )
+            async for label_batch in self.chunk_entity_relation_graph.get_all_labels_iter():
+                for node_label in label_batch:
+                    node_edges = await self.chunk_entity_relation_graph.get_node_edges(node_label)
+                    if node_edges:
+                        for src, tgt in node_edges:
+                            edge_data = await self.chunk_entity_relation_graph.get_edge(src, tgt)
+                            if edge_data and "source_id" in edge_data:
+                                sources = set(edge_data["source_id"].split(GRAPH_FIELD_SEP))
+                                sources.difference_update(chunk_ids)
+                                if not sources:
+                                    relationships_to_delete.add((src, tgt))
+                                else:
+                                    relationships_to_update[(src, tgt)] = GRAPH_FIELD_SEP.join(sources)
 
             # Delete entities
             logger.info(f"start to deleting entities with {len(entities_to_delete)} entities, doc_id: {doc_id}")
@@ -1985,13 +1958,19 @@ class LightRAG:
         # 1. Index all chunks using the iterator
         logger.info("Indexing text chunks...")
         batch_size = self.processing_batch_size
+        total_chunks = 0
         async for batch in self.text_chunks.get_all_iter("chunk", batch_size=batch_size):
+            logger.info(f"start to processing a batch of text chunks...:{len(batch)}")
             await self.chunks_vdb.upsert(batch)
-            logger.info(f"Indexed a batch of {len(batch)} chunks.")
+            total_chunks += len(batch)
+            logger.info(f"Indexed a batch of {len(batch)} chunks. Total indexed: {total_chunks}")
+        logger.info(f"Finished indexing a total of {total_chunks} chunks.")
 
         # 2. Index all entities and relationships from the graph
         logger.info("Indexing entities and relationships from the graph...")
         batch_size = self.processing_batch_size
+        total_entities = 0
+        total_relationships = 0
         async for label_batch in self.chunk_entity_relation_graph.get_all_labels_iter(batch_size=batch_size):
             if not label_batch:
                 continue
@@ -2002,6 +1981,7 @@ class LightRAG:
             edges_batch = await self.chunk_entity_relation_graph.get_edges_batch(
                 [{'src': src, 'tgt': tgt} for src, tgt in await self.chunk_entity_relation_graph.get_nodes_edges_batch(label_batch)]
             )
+            logger.info(f"Extracted {len(nodes_batch)} nodes and {len(edges_batch)} edges for the batch.")
 
             entities_to_index = {}
             relationships_to_index = {}
@@ -2029,11 +2009,16 @@ class LightRAG:
                 }
 
             if entities_to_index:
+                logger.info(f"Upserting {len(entities_to_index)} entities to vector db.")
                 await self.entities_vdb.upsert(entities_to_index)
+                total_entities += len(entities_to_index)
             if relationships_to_index:
+                logger.info(f"Upserting {len(relationships_to_index)} relationships to vector db.")
                 await self.relationships_vdb.upsert(relationships_to_index)
+                total_relationships += len(relationships_to_index)
+            logger.info(f"Batch processed. Total indexed entities: {total_entities}, relationships: {total_relationships}")
 
-        logger.info("Finished building vector index for all data.")
+        logger.info(f"Finished building vector index for all data. Total indexed: {total_chunks} chunks, {total_entities} entities, {total_relationships} relationships.")
         await self._insert_done()
 
     async def aedit_entity(

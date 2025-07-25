@@ -704,7 +704,18 @@ class PGVectorStorage(BaseVectorStorage):
                     for i in range(0, len(contents), self._max_batch_size)
                 ]
                 embedding_tasks = [self.embedding_func(batch) for batch in batches]
-                embeddings_list = await asyncio.gather(*embedding_tasks)
+                try:
+                    results = await asyncio.gather(*embedding_tasks, return_exceptions=True)
+                except Exception as e:
+                    logger.error(f"An error occurred during embedding generation: {e}", exc_info=True)
+                    raise
+                # 检查并处理异常
+                embeddings_list = []
+                for i, result in enumerate(results):
+                    if isinstance(result, Exception):
+                        logger.error(f"Error processing batch {i}: {str(result)}", exc_info=True)
+                        raise result  # 或者根据需要处理异常
+                    embeddings_list.append(result)
                 embeddings = np.concatenate(embeddings_list)
                 for i, d in enumerate(list_data):
                     d["__vector__"] = embeddings[i]
