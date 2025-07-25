@@ -1978,6 +1978,7 @@ class LightRAG:
 
             # Get nodes and edges for the current batch of labels
             nodes_batch = await self.chunk_entity_relation_graph.get_nodes_batch(label_batch)
+            logger.info(f"Extracted nodes batch from the graph: {len(nodes_batch)} nodes for the batch")
             edges_batch = await self.chunk_entity_relation_graph.get_edges_batch(
                 [{'src': src, 'tgt': tgt} for src, tgt in await self.chunk_entity_relation_graph.get_nodes_edges_batch(label_batch)]
             )
