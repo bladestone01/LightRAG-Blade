@@ -1979,20 +1979,17 @@ class LightRAG:
             # Get nodes and edges for the current batch of labels
             nodes_batch = await self.chunk_entity_relation_graph.get_nodes_batch(label_batch)
             logger.info(f"Extracted nodes batch from the graph: {len(nodes_batch)} nodes for the batch")
-            batch_edges_dict = [{'src': src, 'tgt': tgt} for src, tgt in await self.chunk_entity_relation_graph.get_nodes_edges_batch(label_batch)]
-
             batch_edges_dict = await self.chunk_entity_relation_graph.get_nodes_edges_batch(label_batch)
             all_edges = []
 
             for node in nodes_batch:
                 this_edges = batch_edges_dict.get(node, [])
                 for e in this_edges:
-                    sorted_edge = tuple(sorted(e))
-                    if sorted_edge not in seen:
-                        seen.add(sorted_edge)
+                    all_edges.append(e)
+            batch_edge_dict_list = [{'src': e['src'], 'tgt': e['tgt']} for e in all_edges]
 
-            logger.info(f"Extract node edge batch dict list: {len(node_edge_dict_list)}")
-            edges_batch = await self.chunk_entity_relation_graph.get_edges_batch(node_edge_dict_list)
+            logger.info(f"Extract node edge batch dict list: {len(batch_edge_dict_list)}")
+            edges_batch = await self.chunk_entity_relation_graph.get_edges_batch(batch_edge_dict_list)
             logger.info(f"Extracted {len(nodes_batch)} nodes and {len(edges_batch)} edges for the batch.")
 
             entities_to_index = {}
