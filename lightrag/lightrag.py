@@ -1986,6 +1986,7 @@ class LightRAG:
             entities_to_index = {}
             relationships_to_index = {}
 
+            logger.info(f"Extracted graph data in node batch: {len(nodes_batch)} nodes for the batch.")
             for node_id, node_data in nodes_batch.items():
                 entities_to_index[compute_mdhash_id(node_id, prefix="ent-")] = {
                     "content": node_id + "\n" + node_data.get("description", ""),
@@ -1996,6 +1997,7 @@ class LightRAG:
                     "file_path": node_data.get("file_path", ""),
                 }
 
+            logger.info(f"Extracted graph data in edge batch: {len(edges_batch)} edges for the batch.")
             for (src, tgt), edge_data in edges_batch.items():
                 relationships_to_index[compute_mdhash_id(src + tgt, prefix="rel-")] = {
                     "src_id": src,
@@ -2008,6 +2010,7 @@ class LightRAG:
                     "file_path": edge_data.get("file_path", ""),
                 }
 
+            logger.info(f"Indexed {len(entities_to_index)} entities and {len(relationships_to_index)} relationships for the batch.")
             if entities_to_index:
                 logger.info(f"Upserting {len(entities_to_index)} entities to vector db.")
                 await self.entities_vdb.upsert(entities_to_index)
