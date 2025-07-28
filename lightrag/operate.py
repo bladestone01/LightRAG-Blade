@@ -569,6 +569,7 @@ async def merge_nodes_and_edges(
     current_file_number: int = 0,
     total_files: int = 0,
     file_path: str = "unknown_source",
+    build_vector_index: bool = True,
 ) -> None:
     """
        异步方式，从文本片段中提取实体和关系，并将它们存储到知识图谱和向量数据库中.
@@ -670,7 +671,10 @@ async def merge_nodes_and_edges(
                 pipeline_status["history_messages"].append(log_message)
 
         # Update vector databases with all collected data
-        if entity_vdb is not None and entities_data:
+        if (
+            entity_vdb is not None
+            and entities_data
+        ):
             data_for_vdb = {
                 compute_mdhash_id(dp["entity_name"], prefix="ent-"): {
                     "entity_name": dp["entity_name"],
@@ -681,7 +685,7 @@ async def merge_nodes_and_edges(
                 }
                 for dp in entities_data
             }
-            await entity_vdb.upsert(data_for_vdb)
+            await entity_vdb.upsert(data_for_vdb, build_vector_index=build_vector_index)
 
         log_message = f"Updating {total_relations_count} relations {current_file_number}/{total_files}: {file_path}"
         logger.info(log_message)
@@ -690,7 +694,10 @@ async def merge_nodes_and_edges(
                 pipeline_status["latest_message"] = log_message
                 pipeline_status["history_messages"].append(log_message)
 
-        if relationships_vdb is not None and relationships_data:
+        if (
+            relationships_vdb is not None
+            and relationships_data
+        ):
             data_for_vdb = {
                 compute_mdhash_id(dp["src_id"] + dp["tgt_id"], prefix="rel-"): {
                     "src_id": dp["src_id"],
@@ -702,7 +709,8 @@ async def merge_nodes_and_edges(
                 }
                 for dp in relationships_data
             }
-            await relationships_vdb.upsert(data_for_vdb)
+            await relationships_vdb.upsert(data_for_vdb, build_vector_index=build_vector_index)
+
 
 
 async def extract_entities(
