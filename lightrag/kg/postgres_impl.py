@@ -1124,6 +1124,44 @@ ON CONFLICT (id, workspace) DO UPDATE SET
             logger.error(f"Error retrieving vector data for IDs {ids}: {e}")
             return []
 
+    async def update_document(self, doc_id: str, new_data: dict) -> None:
+        """Update a document in the vector storage."""
+        table_name = namespace_to_table_name(self.namespace)
+        if not table_name:
+            logger.error(f"Unknown namespace for update_document: {self.namespace}")
+            return
+
+        # Generate embedding for the new content
+        content = new_data.get("content")
+        if not content:
+            logger.error(f"No content provided to update document {doc_id}")
+            return
+
+        embeddings = await self.embedding_func([content], _priority=5)
+        embedding = embeddings[0]
+        new_data["content_vector"] = json.dumps(embedding.tolist())
+
+        # Prepare the SQL UPDATE statement
+        set_clauses = []
+        params = {"id": doc_id, "workspace": self.db.workspace}
+        i = 3
+        for key, value in new_data.items():
+            set_clauses.append(f"{key} = ${i}")
+            params[key] = value
+            i += 1
+
+        if not set_clauses:
+            logger.warning(f"No fields to update for document {doc_id}")
+            return
+
+        update_sql = f"UPDATE {table_name} SET {', '.join(set_clauses)} WHERE id = $1 AND workspace = $2"
+
+        try:
+            await self.db.execute(update_sql, params)
+            logger.debug(f"Successfully updated document {doc_id} in {self.namespace}")
+        except Exception as e:
+            logger.error(f"Error updating document {doc_id} in {self.namespace}: {e}")
+
     async def drop(self) -> dict[str, str]:
         """Drop the storage"""
         try:

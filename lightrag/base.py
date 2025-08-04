@@ -227,6 +227,16 @@ class BaseVectorStorage(StorageNameSpace, ABC):
         """
         pass
 
+    @abstractmethod
+    async def update_document(self, doc_id: str, new_data: dict) -> None:
+        """Update a document in the vector storage.
+
+        Args:
+            doc_id: The ID of the document to update.
+            new_data: A dictionary containing the new data to update.
+        """
+        pass
+
 
 @dataclass
 class BaseKVStorage(StorageNameSpace, ABC):
@@ -496,6 +506,32 @@ class BaseGraphStorage(StorageNameSpace, ABC):
             target_node_id: The ID of the target node
             edge_data: A dictionary of edge properties
         """
+
+    @abstractmethod
+    async def get_nodes_by_property(
+        self, property_name: str, property_value: Any
+    ) -> list[dict]:
+        """Retrieve nodes that have a specific property value."""
+        pass
+
+    @abstractmethod
+    async def get_edges_by_property(
+        self, property_name: str, property_value: Any
+    ) -> list[dict]:
+        """Retrieve edges that have a specific property value."""
+        pass
+
+    @abstractmethod
+    async def update_node_properties(self, entity_id: str, properties: dict) -> None:
+        """Update properties of a specific node."""
+        pass
+
+    @abstractmethod
+    async def update_edge_properties(
+        self, src_id: str, tgt_id: str, properties: dict
+    ) -> None:
+        """Update properties of a specific edge."""
+        pass
 
     @abstractmethod
     async def delete_node(self, node_id: str) -> None:

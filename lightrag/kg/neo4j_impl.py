@@ -1358,3 +1358,29 @@ class Neo4JStorage(BaseGraphStorage):
         except Exception as e:
             logger.error(f"Error dropping Neo4j database {self._DATABASE}: {e}")
             return {"status": "error", "message": str(e)}
+
+    async def get_nodes_by_property(self, property_name: str, property_value: any) -> list[dict]:
+        async with self._driver.session(database=self._DATABASE, default_access_mode="READ") as session:
+            query = f"MATCH (n) WHERE n.{property_name} = $value RETURN n"
+            result = await session.run(query, value=property_value)
+            nodes = [dict(record["n"]) async for record in result]
+            await result.consume()
+            return nodes
+
+    async def get_edges_by_property(self, property_name: str, property_value: any) -> list[dict]:
+        async with self._driver.session(database=self._DATABASE, default_access_mode="READ") as session:
+            query = f"MATCH ()-[r]->() WHERE r.{property_name} = $value RETURN r"
+            result = await session.run(query, value=property_value)
+            edges = [dict(record["r"]) async for record in result]
+            await result.consume()
+            return edges
+
+    async def update_node_properties(self, entity_id: str, properties: dict) -> None:
+        async with self._driver.session(database=self._DATABASE) as session:
+            query = "MATCH (n:base {entity_id: $entity_id}) SET n += $properties"
+            await session.run(query, entity_id=entity_id, properties=properties)
+
+    async def update_edge_properties(self, src_id: str, tgt_id: str, properties: dict) -> None:
+        async with self._driver.session(database=self._DATABASE) as session:
+            query = "MATCH (:base {entity_id: $src_id})-[r]->(:base {entity_id: $tgt_id}) SET r += $properties"
+            await session.run(query, src_id=src_id, tgt_id=tgt_id, properties=properties)
