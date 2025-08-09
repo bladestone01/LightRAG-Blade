@@ -30,6 +30,7 @@ PROMPTS["entity_extraction"] = """
 - Constrains: 
    1  三元组必须准确反映标准文件的核心内容，确保信息的完整性和准确性，避免遗漏重要信息,保持简洁明了
    2 中国人民共和国国家标准、中华人民共和国XXX行业标准、XXX省市地方标准、XXX团体标准，分别简称为国家标准、行业标准、地方标准、团体标准，它们在实体中被定义为标准类型。
+   3 每次提取实体最多不超过20个，关系最多不超过30个
   
 输出语言使用{language}。
 - Workflow:
@@ -37,7 +38,8 @@ PROMPTS["entity_extraction"] = """
 - entity_name: 实体名称（保持原文语言。）
 - entity_type: 实体类型（从以下选项中选择：[{entity_types}]）
 - entity_description: 对实体属性及活动的完整描述
-将每个实体格式化为：("entity"{tuple_delimiter}<entity_name>{tuple_delimiter}<entity_type>{tuple_delimiter}<entity_description>)
+将每个实体格式化为：("entity"{tuple_delimiter}<entity_name>{tuple_delimiter}<entity_type>{tuple_delimiter}<entity_description>).
+  实体数量最多不超过20个.
 
 2. 从步骤1识别的实体中，找出所有存在明确关联的（源实体，目标实体）组合(source_entity, target_entity)。
 为每对关联实体提取以下信息：
@@ -48,8 +50,9 @@ PROMPTS["entity_extraction"] = """
 - relationship_keywords: 一个或多个概括关系总体性质的高层次关键词，侧重于概念或主题，而不是具体细节
   输出结果规则: 
     a.将每个关系输出严格遵守如下格式：("relationship"<|><source_entity><|><target_entity><|><relationship_description><|><relationship_keywords><|><relationship_strength>)
-    b. 关系方向规则: 'source_entity'必须是**能主动执行动作**的实体（如机构/标准）,`target_entity`必须是**动作接受者**（如日期/指标）,输出前验证：若`source_entity`无法执行该动作（如"日期"不能"发布"），则删除三元组. 
-    c. 关系动词规范 : 仅使用1-2个主动语态动词，禁用被动词汇;强制动词映射表:
+    b. 提取关系最多不超过30个.
+    c.关系方向规则: 'source_entity'必须是**能主动执行动作**的实体（如机构/标准）,`target_entity`必须是**动作接受者**（如日期/指标）,输出前验证：若`source_entity`无法执行该动作（如"日期"不能"发布"），则删除三元组. 
+    d.关系动词规范 : 仅使用1-2个主动语态动词，禁用被动词汇;强制动词映射表:
        | 禁止词 | 替换词 | 适用场景               |
        |--------|--------|----------------------|
        | 归属于 | 分类为 | 标准→类型             |
