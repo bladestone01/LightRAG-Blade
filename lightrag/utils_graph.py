@@ -126,7 +126,8 @@ async def aedit_entity(
 ) -> dict[str, Any]:
     """Asynchronously edit entity information.
 
-    Updates entity information in the knowledge graph and re-embeds the entity in the vector database.
+    Updates entity information in the knowledge graph and conditionally re-embeds the entity in the vector database
+    if its name or description changes.
 
     Args:
         chunk_entity_relation_graph: Graph storage instance
@@ -140,7 +141,6 @@ async def aedit_entity(
         Dictionary containing updated entity information
     """
     graph_db_lock = get_graph_db_lock(enable_logging=False)
-    # Use graph database lock to ensure atomic graph and vector db operations
     async with graph_db_lock:
         try:
             # 1. Get current entity information
@@ -149,17 +149,28 @@ async def aedit_entity(
                 raise ValueError(f"Entity '{entity_name}' does not exist")
             node_data = await chunk_entity_relation_graph.get_node(entity_name)
 
-            # Check if entity is being renamed
+            # Determine if a critical change (rename or description update) has occurred
             new_entity_name = updated_data.get("entity_name", entity_name)
             is_renaming = new_entity_name != entity_name
 
-            # If renaming, check if new name already exists
+            old_description = node_data.get("description", "")
+            new_description = updated_data.get("description")
+            is_description_changed = (
+                new_description is not None and new_description != old_description
+            )
+
+            # 2. Always update entity information in the graph database
+            new_node_data = {**node_data, **updated_data}
+            new_node_data["entity_id"] = new_entity_name
+            if "entity_name" in new_node_data:
+                del new_node_data["entity_name"]
+
+            # Handle graph updates for renaming vs. simple property changes
             if is_renaming:
                 if not allow_rename:
                     raise ValueError(
                         "Entity renaming is not allowed. Set allow_rename=True to enable this feature"
                     )
-
                 existing_node = await chunk_entity_relation_graph.has_node(
                     new_entity_name
                 )
@@ -167,149 +178,110 @@ async def aedit_entity(
                     raise ValueError(
                         f"Entity name '{new_entity_name}' already exists, cannot rename"
                     )
-
-            # 2. Update entity information in the graph
-            new_node_data = {**node_data, **updated_data}
-            new_node_data["entity_id"] = new_entity_name
-
-            if "entity_name" in new_node_data:
-                del new_node_data[
-                    "entity_name"
-                ]  # Node data should not contain entity_name field
-
-            # If renaming entity
-            if is_renaming:
-                logger.info(f"Renaming entity '{entity_name}' to '{new_entity_name}'")
-
-                # Create new entity
+                logger.info(f"Renaming entity '{entity_name}' to '{new_entity_name}' in graph")
                 await chunk_entity_relation_graph.upsert_node(
                     new_entity_name, new_node_data
                 )
-
-                # Store relationships that need to be updated
-                relations_to_update = []
-                relations_to_delete = []
-                # Get all edges related to the original entity
-                edges = await chunk_entity_relation_graph.get_node_edges(entity_name)
+                edges = await chunk_entity_relation_graph.get_node_edges(
+                    entity_name
+                )
                 if edges:
-                    # Recreate edges for the new entity
                     for source, target in edges:
                         edge_data = await chunk_entity_relation_graph.get_edge(
                             source, target
                         )
                         if edge_data:
-                            relations_to_delete.append(
-                                compute_mdhash_id(source + target, prefix="rel-")
-                            )
-                            relations_to_delete.append(
-                                compute_mdhash_id(target + source, prefix="rel-")
-                            )
                             if source == entity_name:
                                 await chunk_entity_relation_graph.upsert_edge(
                                     new_entity_name, target, edge_data
                                 )
-                                relations_to_update.append(
-                                    (new_entity_name, target, edge_data)
-                                )
-                            else:  # target == entity_name
+                            else:
                                 await chunk_entity_relation_graph.upsert_edge(
                                     source, new_entity_name, edge_data
                                 )
-                                relations_to_update.append(
-                                    (source, new_entity_name, edge_data)
-                                )
-
-                # Delete old entity
                 await chunk_entity_relation_graph.delete_node(entity_name)
-
-                # Delete old entity record from vector database
-                old_entity_id = compute_mdhash_id(entity_name, prefix="ent-")
-                await entities_vdb.delete([old_entity_id])
-                logger.info(
-                    f"Deleted old entity '{entity_name}' and its vector embedding from database"
-                )
-
-                # Delete old relation records from vector database
-                await relationships_vdb.delete(relations_to_delete)
-                logger.info(
-                    f"Deleted {len(relations_to_delete)} relation records for entity '{entity_name}' from vector database"
-                )
-
-                # Update relationship vector representations
-                for src, tgt, edge_data in relations_to_update:
-                    description = edge_data.get("description", "")
-                    keywords = edge_data.get("keywords", "")
-                    source_id = edge_data.get("source_id", "")
-                    weight = float(edge_data.get("weight", 1.0))
-
-                    # Create new content for embedding
-                    content = f"{src}\t{tgt}\n{keywords}\n{description}"
-
-                    # Calculate relationship ID
-                    relation_id = compute_mdhash_id(src + tgt, prefix="rel-")
-
-                    # Prepare data for vector database update
-                    relation_data = {
-                        relation_id: {
-                            "content": content,
-                            "src_id": src,
-                            "tgt_id": tgt,
-                            "source_id": source_id,
-                            "description": description,
-                            "keywords": keywords,
-                            "weight": weight,
-                        }
-                    }
-
-                    # Update vector database
-                    await relationships_vdb.upsert(relation_data)
-
-                # Update working entity name to new name
-                entity_name = new_entity_name
             else:
-                # If not renaming, directly update node data
+                # If not renaming, directly update node data in the graph
                 await chunk_entity_relation_graph.upsert_node(
                     entity_name, new_node_data
                 )
 
-            # 3. Recalculate entity's vector representation and update vector database
-            description = new_node_data.get("description", "")
-            source_id = new_node_data.get("source_id", "")
-            entity_type = new_node_data.get("entity_type", "")
-            content = entity_name + "\n" + description
+            # 3. Conditionally update vector representations if a critical change occurred
+            if is_renaming or is_description_changed:
+                logger.info(
+                    f"Critical change for '{entity_name}' detected. Re-embedding..."
+                )
 
-            # Calculate entity ID
-            entity_id = compute_mdhash_id(entity_name, prefix="ent-")
-
-            # Prepare data for vector database update
-            entity_data = {
-                entity_id: {
-                    "content": content,
-                    "entity_name": entity_name,
-                    "source_id": source_id,
-                    "description": description,
-                    "entity_type": entity_type,
+                # Re-embed the entity itself
+                description = new_node_data.get("description", "")
+                source_id = new_node_data.get("source_id", "")
+                entity_type = new_node_data.get("entity_type", "")
+                content = new_entity_name + "\n" + description
+                entity_id = compute_mdhash_id(new_entity_name, prefix="ent-")
+                entity_data_for_vdb = {
+                    entity_id: {
+                        "content": content,
+                        "entity_name": new_entity_name,
+                        "source_id": source_id,
+                        "description": description,
+                        "entity_type": entity_type,
+                    }
                 }
-            }
+                await entities_vdb.upsert(entity_data_for_vdb)
 
-            # Update vector database
-            await entities_vdb.upsert(entity_data)
+                # If renaming, handle old/new vectors and related relations
+                if is_renaming:
+                    old_entity_id_hash = compute_mdhash_id(entity_name, prefix="ent-")
+                    await entities_vdb.delete([old_entity_id_hash])
+
+                    edges = await chunk_entity_relation_graph.get_node_edges(
+                        new_entity_name
+                    )
+                    if edges:
+                        relations_to_delete_hashes = []
+                        relations_to_update_data = {}
+                        for source, target in edges:
+                            relations_to_delete_hashes.append(
+                                compute_mdhash_id(source + target, prefix="rel-")
+                            )
+                            relations_to_delete_hashes.append(
+                                compute_mdhash_id(target + source, prefix="rel-")
+                            )
+                            edge_data = await chunk_entity_relation_graph.get_edge(
+                                source, target
+                            )
+                            if edge_data:
+                                rel_content = f'{edge_data.get("keywords", "")}\t{source}\n{target}\n{edge_data.get("description", "")}'
+                                rel_id = compute_mdhash_id(source + target, prefix="rel-")
+                                relations_to_update_data[rel_id] = {
+                                    "content": rel_content,
+                                    "src_id": source,
+                                    "tgt_id": target,
+                                    **edge_data,
+                                }
+                        await relationships_vdb.delete(relations_to_delete_hashes)
+                        await relationships_vdb.upsert(relations_to_update_data)
+            else:
+                logger.info(
+                    f"No critical changes for '{entity_name}'. Skipping vector update."
+                )
 
             # 4. Save changes
             await _edit_entity_done(
                 entities_vdb, relationships_vdb, chunk_entity_relation_graph
             )
 
-            logger.info(f"Entity '{entity_name}' successfully updated")
+            logger.info(f"Entity '{new_entity_name}' successfully updated")
             return await get_entity_info(
                 chunk_entity_relation_graph,
                 entities_vdb,
-                entity_name,
+                new_entity_name,
                 include_vector_data=True,
             )
         except Exception as e:
             logger.error(f"Error while editing entity '{entity_name}': {e}")
             raise
+
 
 
 async def _edit_entity_done(
@@ -338,7 +310,8 @@ async def aedit_relation(
 ) -> dict[str, Any]:
     """Asynchronously edit relation information.
 
-    Updates relation (edge) information in the knowledge graph and re-embeds the relation in the vector database.
+    Updates relation (edge) information in the knowledge graph and conditionally re-embeds the relation
+    if its description or keywords change.
 
     Args:
         chunk_entity_relation_graph: Graph storage instance
@@ -366,50 +339,63 @@ async def aedit_relation(
             edge_data = await chunk_entity_relation_graph.get_edge(
                 source_entity, target_entity
             )
-            # Important: First delete the old relation record from the vector database
-            old_relation_id = compute_mdhash_id(
-                source_entity + target_entity, prefix="rel-"
-            )
-            await relationships_vdb.delete([old_relation_id])
-            logger.info(
-                f"Deleted old relation record from vector database for relation {source_entity} -> {target_entity}"
+
+            # Determine if a critical change has occurred
+            old_description = edge_data.get("description", "")
+            new_description = updated_data.get("description")
+            is_description_changed = (
+                new_description is not None and new_description != old_description
             )
 
-            # 2. Update relation information in the graph
+            old_keywords = edge_data.get("keywords", "")
+            new_keywords = updated_data.get("keywords")
+            is_keywords_changed = new_keywords is not None and new_keywords != old_keywords
+
+            # 2. Always update relation information in the graph
             new_edge_data = {**edge_data, **updated_data}
             await chunk_entity_relation_graph.upsert_edge(
                 source_entity, target_entity, new_edge_data
             )
 
-            # 3. Recalculate relation's vector representation and update vector database
-            description = new_edge_data.get("description", "")
-            keywords = new_edge_data.get("keywords", "")
-            source_id = new_edge_data.get("source_id", "")
-            weight = float(new_edge_data.get("weight", 1.0))
+            # 3. Conditionally update vector representation
+            if is_description_changed or is_keywords_changed:
+                logger.info(
+                    f"Critical change for relation '{source_entity}'->'{target_entity}' detected. Re-embedding..."
+                )
 
-            # Create content for embedding
-            content = f"{source_entity}\t{target_entity}\n{keywords}\n{description}"
+                # First, delete the old relation record from the vector database
+                old_relation_id = compute_mdhash_id(
+                    source_entity + target_entity, prefix="rel-"
+                )
+                await relationships_vdb.delete([old_relation_id])
 
-            # Calculate relation ID
-            relation_id = compute_mdhash_id(
-                source_entity + target_entity, prefix="rel-"
-            )
+                # Recalculate relation's vector representation
+                description = new_edge_data.get("description", "")
+                keywords = new_edge_data.get("keywords", "")
+                source_id = new_edge_data.get("source_id", "")
+                weight = float(new_edge_data.get("weight", 1.0))
 
-            # Prepare data for vector database update
-            relation_data = {
-                relation_id: {
-                    "content": content,
-                    "src_id": source_entity,
-                    "tgt_id": target_entity,
-                    "source_id": source_id,
-                    "description": description,
-                    "keywords": keywords,
-                    "weight": weight,
+                content = f"{source_entity}\t{target_entity}\n{keywords}\n{description}"
+                relation_id = compute_mdhash_id(
+                    source_entity + target_entity, prefix="rel-"
+                )
+
+                relation_data = {
+                    relation_id: {
+                        "content": content,
+                        "src_id": source_entity,
+                        "tgt_id": target_entity,
+                        "source_id": source_id,
+                        "description": description,
+                        "keywords": keywords,
+                        "weight": weight,
+                    }
                 }
-            }
-
-            # Update vector database
-            await relationships_vdb.upsert(relation_data)
+                await relationships_vdb.upsert(relation_data)
+            else:
+                logger.info(
+                    f"No critical changes for relation '{source_entity}'->'{target_entity}'. Skipping vector update."
+                )
 
             # 4. Save changes
             await _edit_relation_done(relationships_vdb, chunk_entity_relation_graph)
@@ -429,6 +415,7 @@ async def aedit_relation(
                 f"Error while editing relation from '{source_entity}' to '{target_entity}': {e}"
             )
             raise
+
 
 
 async def _edit_relation_done(relationships_vdb, chunk_entity_relation_graph) -> None:

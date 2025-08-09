@@ -895,9 +895,44 @@ ON CONFLICT (id, workspace) DO UPDATE SET
 
             if not result or len(result) < page_size:
                 logger.info(f"Loop the data to the end, total page:{current_page}")
-                break;
+                break; 
             current_page += 1
         logger.info(f"Finished the loop in table {table_name}, total time:{time.time() - start_time}")
+
+    async def acheck_for_file_uuid(self, file_uuid: str) -> bool:
+        """
+        Efficiently checks if any record in this table contains the given file_uuid in its file_path.
+        This method directly queries the PostgreSQL database.
+        """
+        if not self.db or not self.db.pool:
+            raise ConnectionError("Database is not initialized or connection pool is not available.")
+
+        if not file_uuid:
+            logger.warning("acheck_for_file_uuid called with an empty file_uuid.")
+            return False
+
+        table_name = ""
+        if is_namespace(self.namespace, NameSpace.VECTOR_STORE_ENTITIES):
+            table_name = "LIGHTRAG_VDB_ENTITY"
+        elif is_namespace(self.namespace, NameSpace.VECTOR_STORE_RELATIONSHIPS):
+            table_name = "LIGHTRAG_VDB_RELATION"
+        elif is_namespace(self.namespace, NameSpace.VECTOR_STORE_CHUNKS):
+            table_name = "LIGHTRAG_DOC_CHUNKS"
+        
+        if not table_name:
+            logger.warning(f"acheck_for_file_uuid not supported for namespace: {self.namespace}")
+            return False
+
+        sql_query = f'SELECT 1 FROM "{table_name}" WHERE file_path ILIKE $1 LIMIT 1'
+        param = f"%{file_uuid}%"
+        
+        try:
+            async with self.db.pool.acquire() as connection:
+                result = await connection.fetchrow(sql_query, param)
+                return result is not None
+        except Exception as e:
+            logger.error(f"Failed to query table {table_name} for file_uuid: {e}")
+            return False
 
     async def __update_entity_records__(self, entity_to_updates: dict[str, dict[str, Any]]) -> None:
         """

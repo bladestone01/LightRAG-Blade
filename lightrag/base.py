@@ -227,6 +227,13 @@ class BaseVectorStorage(StorageNameSpace, ABC):
         """
         pass
 
+    async def acheck_for_file_uuid(self, file_uuid: str) -> bool:
+        """
+        Checks if any data exists for a given file_uuid.
+        This is an optional method, and may not be implemented by all storages.
+        """
+        return False
+
 
 @dataclass
 class BaseKVStorage(StorageNameSpace, ABC):

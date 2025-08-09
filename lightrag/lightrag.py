@@ -128,11 +128,8 @@ class LightRAG:
     )
     """设置摘要的最大token数"""
 
-    force_llm_summary_on_merge: int = field(
-        default=get_env_value(
-            "FORCE_LLM_SUMMARY_ON_MERGE", DEFAULT_FORCE_LLM_SUMMARY_ON_MERGE, int
-        )
-    )
+    force_llm_summary_on_merge: int = field(default=80)
+    """When merging nodes, if a node's degree (number of relationships) exceeds this threshold, force a regeneration of its summary using an LLM."""
 
     # Text chunking
     # ---
@@ -1907,6 +1904,36 @@ class LightRAG:
         return loop.run_until_complete(
             self.adelete_by_relation(source_entity, target_entity)
         )
+
+    def is_graph_data_exist(self, file_uuid: str) -> bool:
+        """
+        Checks if any graph data (nodes or relationships) exists for a given file_uuid.
+        """
+        loop = always_get_an_event_loop()
+        return loop.run_until_complete(self.ais_graph_data_exist(file_uuid))
+
+    async def ais_graph_data_exist(self, file_uuid: str) -> bool:
+        """
+        Asynchronously checks if any graph data (nodes or relationships) exists for a given file_uuid
+        by querying the underlying vector storage.
+        """
+        if not file_uuid:
+            return False
+
+        # Check entities
+        entity_exists = await self.entities_vdb.acheck_for_file_uuid(file_uuid)
+        if entity_exists:
+            logger.debug(f"Found file_uuid '{file_uuid}' in entities vector storage.")
+            return True
+
+        # Check relationships
+        relation_exists = await self.relationships_vdb.acheck_for_file_uuid(file_uuid)
+        if relation_exists:
+            logger.debug(f"Found file_uuid '{file_uuid}' in relationships vector storage.")
+            return True
+
+        logger.debug(f"No data found for file_uuid '{file_uuid}' in vector storage.")
+        return False
 
     async def get_processing_status(self) -> dict[str, int]:
         """Get current document processing status counts

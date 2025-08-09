@@ -1,6 +1,7 @@
 from .lightrag import LightRAG as LightRAG, QueryParam as QueryParam
 
 #  1.3.7.43 : filter the duplicate reference item in response.
-__version__ = "1.3.7.45"
+__version__ = "1.3.7.50"
 __author__ = "Zirui Guo"
 __url__ = "https://github.com/HKUDS/LightRAG"
+__description__ = "optimize the token consumption in LLM API and text embedding API"
