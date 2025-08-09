@@ -911,19 +911,14 @@ ON CONFLICT (id, workspace) DO UPDATE SET
             logger.warning("acheck_for_file_uuid called with an empty file_uuid.")
             return False
 
-        table_name = ""
-        if is_namespace(self.namespace, NameSpace.VECTOR_STORE_ENTITIES):
-            table_name = "LIGHTRAG_VDB_ENTITY"
-        elif is_namespace(self.namespace, NameSpace.VECTOR_STORE_RELATIONSHIPS):
-            table_name = "LIGHTRAG_VDB_RELATION"
-        elif is_namespace(self.namespace, NameSpace.VECTOR_STORE_CHUNKS):
-            table_name = "LIGHTRAG_DOC_CHUNKS"
-        
+        table_name = namespace_to_table_name(self.namespace)
+        logger.info(f"Checking for file_uuid in table: {self.namespace}/ {table_name}")
         if not table_name:
             logger.warning(f"acheck_for_file_uuid not supported for namespace: {self.namespace}")
             return False
 
-        sql_query = f'SELECT 1 FROM "{table_name}" WHERE file_path ILIKE $1 LIMIT 1'
+        sql_query = f'SELECT 1 FROM {table_name} WHERE file_path ILIKE $1 LIMIT 1'
+        logger.info(f"acheck for file uuid, SQL query: {sql_query}")
         param = f"%{file_uuid}%"
         
         try:
