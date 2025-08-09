@@ -8,7 +8,7 @@ consistency and makes maintenance easier.
 
 # Default values for environment variables
 DEFAULT_MAX_TOKEN_SUMMARY = 500
-DEFAULT_FORCE_LLM_SUMMARY_ON_MERGE = 40
+DEFAULT_FORCE_LLM_SUMMARY_ON_MERGE = 80
 DEFAULT_WOKERS = 2
 DEFAULT_TIMEOUT = 150
 

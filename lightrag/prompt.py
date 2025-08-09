@@ -268,7 +268,7 @@ PROMPTS["rag_response"] = """---角色---
   正确的输出：
     [1] [食品添加剂乳酸锌/WS 217—2002](http://bs.phsciencedata.cn/#/original?u=1-064daeca-34b3-4a65-8f65-74aa6c1fe83a), 2002
     [2] [碳酸钙国家标准/WS 216—2001](http://bs.phsciencedata.cn/#/original?u=1-80861766-34b3-4a65-8f65-74321), 2001
-- 如不知道答案，请直接说明
+- 如不知道答案或未找到相关内容，请直接说明，在这种情况下，无需提供参考文献。
 - 请勿编造信息。不要包含知识库未提供的内容
 - 额外的用户提示词:{user_prompt}
 响应结果:"""
@@ -410,7 +410,7 @@ PROMPTS["naive_rag_response"] = """---角色---
   正确的输出：
     [1] [食品添加剂乳酸锌/WS 217—2002](http://bs.phsciencedata.cn/#/original?u=1-064daeca-34b3-4a65-8f65-74aa6c1fe83a), 2002
     [2] [碳酸钙国家标准/WS 216—2001](http://bs.phsciencedata.cn/#/original?u=1-80861766-34b3-4a65-8f65-74321), 2001
-- 如不知道答案，请直接说明
+- 如不知道答案或未找到相关内容，请直接说明，在这种情况下，无需提供参考文献。
 - 请勿编造信息。不要包含知识库未提供的内容
 - 额外的用户提示词:{user_prompt}
 
