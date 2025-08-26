@@ -278,9 +278,7 @@ class LightRAG:
     The default function is :func:`.utils.convert_response_to_json`.
     """
 
-    cosine_better_than_threshold: float = field(
-        default=float(os.getenv("COSINE_THRESHOLD", 0.2))
-    )
+    cosine_better_than_threshold: float = field(default=0.2)
 
     _storages_status: StoragesStatus = field(default=StoragesStatus.NOT_CREATED)
 
