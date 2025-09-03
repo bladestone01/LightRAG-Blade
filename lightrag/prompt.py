@@ -38,7 +38,6 @@ PROMPTS["entity_extraction"] = """
 - entity_type: 实体类型（从以下选项中选择：[{entity_types}]）
 - entity_description: 对实体属性及活动的完整描述
 将每个实体格式化为：("entity"{tuple_delimiter}<entity_name>{tuple_delimiter}<entity_type>{tuple_delimiter}<entity_description>).
-  实体数量最多不超过20个.
 
 2. 从步骤1识别的实体中，找出所有存在明确关联的（源实体，目标实体）组合(source_entity, target_entity)。
 为每对关联实体提取以下信息：
