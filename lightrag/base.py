@@ -572,6 +572,21 @@ class BaseGraphStorage(StorageNameSpace, ABC):
             indicating whether the graph was truncated due to max_nodes limit
         """
 
+    @abstractmethod
+    async def get_node_count(self, file_id: str):
+        """Find records by file_id."""
+        pass
+
+    @abstractmethod
+    async def get_edge_count(self, file_id: str):
+        """Get edge count by file_id."""
+        pass
+
+    @abstractmethod
+    async def remove_filepath_by_file_id(self, file_id:str):
+        """Find records by file_ids with pagination."""
+        pass
+
 
 class DocStatus(str, Enum):
     """Document processing status"""

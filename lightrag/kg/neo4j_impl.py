@@ -1233,12 +1233,135 @@ class Neo4JStorage(BaseGraphStorage):
         """
         logger.warn(
             "The get_all_labels method is deprecated and can cause memory issues. Use get_all_labels_iter instead.",
-            DeprecationWarning
+            DeprecationWarning,
         )
         all_labels = []
         async for batch in self.get_all_labels_iter():
             all_labels.extend(batch)
         return all_labels
+
+    async def get_edge_count(self, file_id: str) -> int:
+        """
+        Counts the number of edges where the file_path property contains the given file_id.
+
+        Args:
+            file_id: The substring (usually a file id) to search for in the file_path property of an edge.
+
+        Returns:
+            The number of matching edges.
+        """
+        async with self._driver.session(
+            database=self._DATABASE, default_access_mode="READ"
+        ) as session:
+            try:
+                query = """
+                MATCH ()-[r]->()
+                WHERE r.file_path CONTAINS $file_id
+                RETURN count(r) AS edge_count
+                """
+                result = await session.run(query, file_id=file_id)
+                record = await result.single()
+                await result.consume()
+                return record["edge_count"] if record else 0
+            except Exception as e:
+                logger.error(f"Error getting edge count for file_id {file_id}: {str(e)}")
+                raise
+
+    async def get_node_count(self, file_id: str) -> int:
+        """
+        Counts the number of nodes where the file_path property contains the given file_id.
+
+        Args:
+            file_id: The substring (usually a file id) to search for in the file_path property.
+
+        Returns:
+            The number of matching nodes.
+        """
+        async with self._driver.session(
+            database=self._DATABASE, default_access_mode="READ"
+        ) as session:
+            try:
+                query = """
+                MATCH (n)
+                WHERE n.file_path CONTAINS $file_id
+                RETURN count(n) AS node_count
+                """
+                result = await session.run(query, file_id=file_id)
+                record = await result.single()
+                await result.consume()
+                return record["node_count"] if record else 0
+            except Exception as e:
+                logger.error(f"Error getting node count for file_id {file_id}: {str(e)}")
+                raise
+
+    async def remove_filepath_by_file_id(self, file_ids: list[str]) -> bool:
+        """
+        Removes file path entries from the file_path property of nodes and edges
+        for a given list of file_ids. It assumes file_path is a string with
+        parts separated by '<SEP>'. If the file_path becomes empty after removal,
+        the node or edge is deleted.
+
+        Args:
+            file_ids: A list of file_id strings to remove from file_path properties.
+
+        Returns:
+            True if the operation was successful.
+        """
+        async with self._driver.session(database=self._DATABASE) as session:
+            try:
+
+                async def execute_removal(tx: AsyncManagedTransaction):
+                    # Update nodes' file_path
+                    node_update_query = """
+                    UNWIND $file_ids as file_id
+                    MATCH (e)
+                    WHERE e.file_path IS NOT NULL AND e.file_path CONTAINS file_id
+                    WITH e, file_id, split(e.file_path, "<SEP>") AS parts
+                    WITH e, [part IN parts WHERE NOT part CONTAINS file_id] AS filteredParts
+                    WITH e, apoc.text.join(filteredParts, "<SEP>") AS newPath
+                    SET e.file_path = newPath
+                    """
+                    await tx.run(node_update_query, file_ids=file_ids)
+
+                    # Delete nodes where file_path is now empty
+                    node_delete_query = """
+                    MATCH (e)
+                    WHERE e.file_path = ""
+                    DETACH DELETE e
+                    """
+                    await tx.run(node_delete_query)
+
+                    # Update relationships' file_path
+                    rel_update_query = """
+                    UNWIND $file_ids as file_id
+                    MATCH ()-[r]-()
+                    WHERE r.file_path IS NOT NULL AND r.file_path CONTAINS file_id
+                    WITH r, file_id, split(r.file_path, "<SEP>") AS parts
+                    WITH r, [part IN parts WHERE NOT part CONTAINS file_id] AS filteredParts
+                    WITH r, apoc.text.join(filteredParts, "<SEP>") AS newFilePath
+                    SET r.file_path = newFilePath
+                    """
+                    await tx.run(rel_update_query, file_ids=file_ids)
+
+                    # Delete relationships where file_path is now empty
+                    rel_delete_query = """
+                    MATCH ()-[r]-()
+                    WHERE r.file_path = ""
+                    DELETE r
+                    """
+                    await tx.run(rel_delete_query)
+
+                    return True
+
+                return await session.execute_write(execute_removal)
+            except Exception as e:
+                logger.error(
+                    f"Error removing file_path for file_ids {file_ids}: {str(e)}"
+                )
+                raise
+
+
+
 
     @retry(
         stop=stop_after_attempt(3),
