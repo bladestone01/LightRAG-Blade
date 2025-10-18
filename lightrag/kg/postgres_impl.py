@@ -929,6 +929,64 @@ ON CONFLICT (id, workspace) DO UPDATE SET
             logger.error(f"Failed to query table {table_name} for file_uuid: {e}")
             return False
 
+    async def update_filepath_by_file_uuid(self, file_uuid: str) -> bool:
+        """
+        Removes a file path entry containing the given file_uuid from the file_path property
+        of entities and relations in the PostgreSQL database.
+        If the file_path becomes empty or NULL after the update, the record is deleted.
+        """
+        if not self.db or not self.db.pool:
+            raise ConnectionError("Database is not initialized or connection pool is not available.")
+
+        like_pattern = f"%{file_uuid}%"
+
+        try:
+            async with self.db.pool.acquire() as connection:
+                async with connection.transaction():
+                    # Update entities table
+                    entity_update_sql = """
+                    UPDATE lightrag_vdb_entity 
+                    SET file_path = COALESCE((
+                        SELECT string_agg(elem, '<SEP>')
+                        FROM unnest(string_to_array(file_path, '<SEP>')) AS elem
+                        WHERE elem NOT LIKE $1
+                    ), '')
+                    WHERE file_path LIKE $1
+                    """
+                    await connection.execute(entity_update_sql, like_pattern)
+
+                    # Update relations table
+                    relation_update_sql = """
+                    UPDATE lightrag_vdb_relation 
+                    SET file_path = COALESCE((
+                        SELECT string_agg(elem, '<SEP>')
+                        FROM unnest(string_to_array(file_path, '<SEP>')) AS elem
+                        WHERE elem NOT LIKE $1
+                    ), '')
+                    WHERE file_path LIKE $1
+                    """
+                    await connection.execute(relation_update_sql, like_pattern)
+
+                    # Delete entities with empty or NULL file_path
+                    entity_delete_sql = """
+                    DELETE FROM lightrag_vdb_entity 
+                    WHERE file_path IS NULL OR file_path = ''
+                    """
+                    await connection.execute(entity_delete_sql)
+
+                    # Delete relations with empty or NULL file_path
+                    relation_delete_sql = """
+                    DELETE FROM lightrag_vdb_relation 
+                    WHERE file_path IS NULL OR file_path = ''
+                    """
+                    await connection.execute(relation_delete_sql)
+            
+            logger.info(f"Successfully updated file_path and cleaned up records for file_uuid: {file_uuid}")
+            return True
+        except Exception as e:
+            logger.error(f"Error processing file_path for file_uuid {file_uuid}: {e}")
+            raise
+
     async def __update_entity_records__(self, entity_to_updates: dict[str, dict[str, Any]]) -> None:
         """
            更新记录

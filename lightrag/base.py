@@ -221,6 +221,16 @@ class BaseVectorStorage(StorageNameSpace, ABC):
         Args:
             ids: List of vector IDs to be deleted
         """
+        pass
+
+    @abstractmethod
+    async def update_filepath_by_file_uuid(self, file_uuid: str):
+        """Update filepath by file uuid
+
+        Args:
+            file_uuid: The unique identifier of the file
+        """
+        pass
 
     async def delete_by_doc_id(self, doc_id:str,  chunk_ids: list[str]) -> None:
         """Delete vectors with file uuid, doc_id and chunk_ids
