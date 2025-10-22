@@ -223,6 +223,13 @@ class BaseVectorStorage(StorageNameSpace, ABC):
         """
         pass
 
+    async def write_ops(self, sql: str | None = None) -> None:
+        """Write the storage to disk.
+        This method is optional and may not be implemented by all storages.
+        For in-memory storages, this method should be implemented to persist the data.
+        """
+        pass
+
     @abstractmethod
     async def update_filepath_by_file_uuid(self, file_uuid: str):
         """Update filepath by file uuid

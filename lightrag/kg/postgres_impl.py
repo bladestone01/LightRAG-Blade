@@ -603,6 +603,16 @@ class PGVectorStorage(BaseVectorStorage):
             )
         self.cosine_better_than_threshold = cosine_threshold
 
+    async def write_ops(self, sql: str | None = None) -> None:
+        """Execute a SQL write operation."""
+        if sql:
+            try:
+                await self.db.execute(sql)
+                logger.info(f"Successfully executed write operation: {sql}")
+            except Exception as e:
+                logger.error(f"Error executing write operation: {sql}, error: {e}")
+                raise
+
     async def initialize(self):
         if self.db is None:
             self.db = await ClientManager.get_client()

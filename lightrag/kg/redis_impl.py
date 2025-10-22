@@ -325,6 +325,8 @@ class RedisKVStorage(BaseKVStorage):
 
     async def delete_by_doc_ids(self, doc_ids: list[str]) -> None:
         """Delete specific records from storage by their doc_ids
+        only work for text_chunk:doc_id:{full_doc_id}.
+           Please use delete if you are not trying to operate on text_chunks
         """
         if not doc_ids:
             logger.info(f"未找到doc_ids: {doc_ids}")
