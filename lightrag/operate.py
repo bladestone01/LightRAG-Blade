@@ -1038,11 +1038,17 @@ async def kg_query(
     len_of_prompts = len(tokenizer.encode(query + sys_prompt))
     logger.debug(f"[kg_query]Prompt Tokens: {len_of_prompts}")
 
+    logger.info("Sending request to LLM...")
+    logger.info(f"System Prompt: {sys_prompt}")
+    logger.info(f"User Query: {query}")
+
     response = await use_model_func(
         query,
         system_prompt=sys_prompt,
         stream=query_param.stream,
     )
+
+    logger.info(f"LLM Response: {response}")
 
     if query_param.stream:
         logger.info(f"Streaming response: {response}")
@@ -1443,6 +1449,13 @@ async def _get_node_data(
         better_than_threshold=query_param.cosine_better_than_threshold,
     )
 
+    if len(results) > 0:
+        logger.info(f"Vector search results (Top {len(results)}):")
+        for i, r in enumerate(results):
+            logger.info(f"  [{i}] Entity: {r.get('entity_name', 'N/A')}, ID: {r.get('id', 'N/A')}, Score: {r.get('distance', 'N/A')}")
+    else:
+        logger.info("Vector search returned no results.")
+
     if not len(results):
         return "", "", ""
 
@@ -1454,6 +1467,14 @@ async def _get_node_data(
         knowledge_graph_inst.get_nodes_batch(node_ids),
         knowledge_graph_inst.node_degrees_batch(node_ids),
     )
+
+    logger.info(f"Neo4j Node Retrieval Results (Before Truncation) (Count: {len(nodes_dict)}):")
+    for nid, n_data in nodes_dict.items():
+        if n_data:
+            degree = degrees_dict.get(nid, 0)
+            logger.info(f"  Node: {nid}, Degree: {degree}, Data: {json.dumps(n_data, ensure_ascii=False)}")
+        else:
+            logger.info(f"  Node: {nid} not found in Neo4j.")
 
     # Now, if you need the node data and degree in order:
     node_datas = [nodes_dict.get(nid) for nid in node_ids]
@@ -1496,6 +1517,9 @@ async def _get_node_data(
     logger.debug(
         f"Truncate entities from {len_node_datas} to {len(node_datas)} (max tokens:{query_param.max_token_for_local_context})"
     )
+    logger.info(f"Neo4j Node Retrieval Results (After Truncation) (Count: {len(node_datas)}):")
+    for i, n in enumerate(node_datas):
+         logger.info(f"  [{i}] Node: {n['entity_name']}, Rank: {n.get('rank', 'N/A')}, Data: {json.dumps(n, ensure_ascii=False)}")
 
     logger.info(
         f"Local query uses {len(node_datas)} entites, {len(use_relations)} relations, {len(use_text_units)} chunks"
@@ -1720,6 +1744,12 @@ async def _find_most_related_edges_from_entities(
         knowledge_graph_inst.edge_degrees_batch(edge_pairs_tuples),
     )
 
+    logger.info(f"Neo4j Edge Retrieval Results (Before Truncation) (Count: {len(edge_data_dict)}):")
+    for pair, e_data in edge_data_dict.items():
+        if e_data:
+            degree = edge_degrees_dict.get(pair, 0)
+            logger.info(f"  Edge: {pair}, Rank/Degree: {degree}, Data: {json.dumps(e_data, ensure_ascii=False)}")
+
     # Reconstruct edge_datas list in the same order as the deduplicated results.
     all_edges_data = []
     for pair in all_edges:
@@ -1752,6 +1782,10 @@ async def _find_most_related_edges_from_entities(
     logger.debug(
         f"Truncate relations from {len(all_edges)} to {len(all_edges_data)} (max tokens:{query_param.max_token_for_global_context})"
     )
+
+    logger.info(f"Neo4j Edge Retrieval Results (After Truncation) (Count: {len(all_edges_data)}):")
+    for i, e in enumerate(all_edges_data):
+        logger.info(f"  [{i}] Edge: {e['src_tgt']}, Rank: {e.get('rank', 'N/A')}, Data: {json.dumps(e, ensure_ascii=False)}")
 
     return all_edges_data
 
