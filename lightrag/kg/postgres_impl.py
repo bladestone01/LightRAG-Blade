@@ -806,7 +806,11 @@ ON CONFLICT (id, workspace) DO UPDATE SET
 
     #################### query method ###############
     async def query(
-        self, query: str, top_k: int, ids: list[str] | None = None
+        self,
+        query: str,
+        top_k: int,
+        ids: list[str] | None = None,
+        better_than_threshold: float | None = None,
     ) -> list[dict[str, Any]]:
         embeddings = await self.embedding_func(
             [query], _priority=5
@@ -818,7 +822,9 @@ ON CONFLICT (id, workspace) DO UPDATE SET
         params = {
             "workspace": self.db.workspace,
             "doc_ids": ids,
-            "better_than_threshold": self.cosine_better_than_threshold,
+            "better_than_threshold": better_than_threshold
+            if better_than_threshold is not None
+            else self.cosine_better_than_threshold,
             "top_k": top_k,
         }
         results = await self.db.query(sql, params=params, multirows=True)

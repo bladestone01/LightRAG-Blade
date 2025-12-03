@@ -107,7 +107,11 @@ class MilvusVectorDBStorage(BaseVectorStorage):
         return results
 
     async def query(
-        self, query: str, top_k: int, ids: list[str] | None = None
+        self,
+        query: str,
+        top_k: int,
+        ids: list[str] | None = None,
+        better_than_threshold: float | None = None,
     ) -> list[dict[str, Any]]:
         embedding = await self.embedding_func(
             [query], _priority=5
@@ -119,7 +123,11 @@ class MilvusVectorDBStorage(BaseVectorStorage):
             output_fields=list(self.meta_fields) + ["created_at"],
             search_params={
                 "metric_type": "COSINE",
-                "params": {"radius": self.cosine_better_than_threshold},
+                "params": {
+                    "radius": better_than_threshold
+                    if better_than_threshold is not None
+                    else self.cosine_better_than_threshold
+                },
             },
         )
         print(results)

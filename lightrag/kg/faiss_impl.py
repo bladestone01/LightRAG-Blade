@@ -170,7 +170,11 @@ class FaissVectorDBStorage(BaseVectorStorage):
         return [m["__id__"] for m in list_data]
 
     async def query(
-        self, query: str, top_k: int, ids: list[str] | None = None
+        self,
+        query: str,
+        top_k: int,
+        ids: list[str] | None = None,
+        better_than_threshold: float | None = None,
     ) -> list[dict[str, Any]]:
         """
         Search by a textual query; returns top_k results with their metadata + similarity distance.
@@ -182,8 +186,13 @@ class FaissVectorDBStorage(BaseVectorStorage):
         embedding = np.array(embedding, dtype=np.float32)
         faiss.normalize_L2(embedding)  # we do in-place normalization
 
+        threshold = (
+            better_than_threshold
+            if better_than_threshold is not None
+            else self.cosine_better_than_threshold
+        )
         logger.info(
-            f"Query: {query}, top_k: {top_k}, threshold: {self.cosine_better_than_threshold}"
+            f"Query: {query}, top_k: {top_k}, threshold: {threshold}"
         )
 
         # Perform the similarity search
@@ -200,7 +209,7 @@ class FaissVectorDBStorage(BaseVectorStorage):
                 continue
 
             # Cosine similarity threshold
-            if dist < self.cosine_better_than_threshold:
+            if dist < threshold:
                 continue
 
             meta = self._id_to_meta.get(idx, {})

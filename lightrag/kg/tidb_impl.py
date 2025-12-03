@@ -429,7 +429,11 @@ class TiDBVectorDBStorage(BaseVectorStorage):
             self.db = None
 
     async def query(
-        self, query: str, top_k: int, ids: list[str] | None = None
+        self,
+        query: str,
+        top_k: int,
+        ids: list[str] | None = None,
+        better_than_threshold: float | None = None,
     ) -> list[dict[str, Any]]:
         """Search from tidb vector"""
         embeddings = await self.embedding_func(
@@ -442,7 +446,9 @@ class TiDBVectorDBStorage(BaseVectorStorage):
         params = {
             "embedding_string": embedding_string,
             "top_k": top_k,
-            "better_than_threshold": self.cosine_better_than_threshold,
+            "better_than_threshold": better_than_threshold
+            if better_than_threshold is not None
+            else self.cosine_better_than_threshold,
         }
 
         results = await self.db.query(

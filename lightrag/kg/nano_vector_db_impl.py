@@ -122,7 +122,11 @@ class NanoVectorDBStorage(BaseVectorStorage):
             )
 
     async def query(
-        self, query: str, top_k: int, ids: list[str] | None = None
+        self,
+        query: str,
+        top_k: int,
+        ids: list[str] | None = None,
+        better_than_threshold: float | None = None,
     ) -> list[dict[str, Any]]:
         # Execute embedding outside of lock to avoid improve cocurrent
         embedding = await self.embedding_func(
@@ -134,7 +138,9 @@ class NanoVectorDBStorage(BaseVectorStorage):
         results = client.query(
             query=embedding,
             top_k=top_k,
-            better_than_threshold=self.cosine_better_than_threshold,
+            better_than_threshold=better_than_threshold
+            if better_than_threshold is not None
+            else self.cosine_better_than_threshold,
         )
         results = [
             {

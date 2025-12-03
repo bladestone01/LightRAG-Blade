@@ -165,7 +165,11 @@ class ChromaVectorDBStorage(BaseVectorStorage):
             raise
 
     async def query(
-        self, query: str, top_k: int, ids: list[str] | None = None
+        self,
+        query: str,
+        top_k: int,
+        ids: list[str] | None = None,
+        better_than_threshold: float | None = None,
     ) -> list[dict[str, Any]]:
         try:
             embedding = await self.embedding_func(
@@ -185,6 +189,11 @@ class ChromaVectorDBStorage(BaseVectorStorage):
             # ChromaDB returns cosine similarity (1 = identical, 0 = orthogonal)
             # We convert to distance (0 = identical, 1 = orthogonal) via (1 - similarity)
             # Only keep results with distance below threshold, then take top k
+            threshold = (
+                better_than_threshold
+                if better_than_threshold is not None
+                else self.cosine_better_than_threshold
+            )
             return [
                 {
                     "id": results["ids"][0][i],
@@ -194,7 +203,7 @@ class ChromaVectorDBStorage(BaseVectorStorage):
                     **results["metadatas"][0][i],
                 }
                 for i in range(len(results["ids"][0]))
-                if (1 - results["distances"][0][i]) >= self.cosine_better_than_threshold
+                if (1 - results["distances"][0][i]) >= threshold
             ][:top_k]
 
         except Exception as e:

@@ -98,6 +98,9 @@ class QueryParam:
     If proivded, this will be use instead of the default vaulue from prompt template.
     """
 
+    cosine_better_than_threshold: float | None = None
+    """Optional override for the cosine similarity threshold."""
+
 
 @dataclass
 class StorageNameSpace(ABC):
@@ -151,7 +154,11 @@ class BaseVectorStorage(StorageNameSpace, ABC):
 
     @abstractmethod
     async def query(
-        self, query: str, top_k: int, ids: list[str] | None = None
+        self,
+        query: str,
+        top_k: int,
+        ids: list[str] | None = None,
+        better_than_threshold: float | None = None,
     ) -> list[dict[str, Any]]:
         """Query the vector storage and retrieve top_k results."""
 

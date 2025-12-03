@@ -1034,7 +1034,11 @@ class MongoVectorDBStorage(BaseVectorStorage):
         return list_data
 
     async def query(
-        self, query: str, top_k: int, ids: list[str] | None = None
+        self,
+        query: str,
+        top_k: int,
+        ids: list[str] | None = None,
+        better_than_threshold: float | None = None,
     ) -> list[dict[str, Any]]:
         """Queries the vector database using Atlas Vector Search."""
         # Generate the embedding
@@ -1057,7 +1061,15 @@ class MongoVectorDBStorage(BaseVectorStorage):
                 }
             },
             {"$addFields": {"score": {"$meta": "vectorSearchScore"}}},
-            {"$match": {"score": {"$gte": self.cosine_better_than_threshold}}},
+            {
+                "$match": {
+                    "score": {
+                        "$gte": better_than_threshold
+                        if better_than_threshold is not None
+                        else self.cosine_better_than_threshold
+                    }
+                }
+            },
             {"$project": {"vector": 0}},
         ]
 

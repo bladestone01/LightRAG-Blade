@@ -128,7 +128,11 @@ class QdrantVectorDBStorage(BaseVectorStorage):
         return results
 
     async def query(
-        self, query: str, top_k: int, ids: list[str] | None = None
+        self,
+        query: str,
+        top_k: int,
+        ids: list[str] | None = None,
+        better_than_threshold: float | None = None,
     ) -> list[dict[str, Any]]:
         embedding = await self.embedding_func(
             [query], _priority=5
@@ -138,7 +142,9 @@ class QdrantVectorDBStorage(BaseVectorStorage):
             query_vector=embedding[0],
             limit=top_k,
             with_payload=True,
-            score_threshold=self.cosine_better_than_threshold,
+            score_threshold=better_than_threshold
+            if better_than_threshold is not None
+            else self.cosine_better_than_threshold,
         )
 
         logger.debug(f"query result: {results}")

@@ -1238,7 +1238,10 @@ async def _get_vector_context(
     """
     try:
         results = await chunks_vdb.query(
-            query, top_k=query_param.top_k, ids=query_param.ids
+            query,
+            top_k=query_param.top_k,
+            ids=query_param.ids,
+            better_than_threshold=query_param.cosine_better_than_threshold,
         )
         if not results:
             return [], [], []
@@ -1434,7 +1437,10 @@ async def _get_node_data(
     )
 
     results = await entities_vdb.query(
-        query, top_k=query_param.top_k, ids=query_param.ids
+        query,
+        top_k=query_param.top_k,
+        ids=query_param.ids,
+        better_than_threshold=query_param.cosine_better_than_threshold,
     )
 
     if not len(results):
@@ -1762,7 +1768,10 @@ async def _get_edge_data(
     )
 
     results = await relationships_vdb.query(
-        keywords, top_k=query_param.top_k, ids=query_param.ids
+        keywords,
+        top_k=query_param.top_k,
+        ids=query_param.ids,
+        better_than_threshold=query_param.cosine_better_than_threshold,
     )
 
     if not len(results):
