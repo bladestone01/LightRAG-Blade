@@ -420,3 +420,77 @@ class NetworkXStorage(BaseGraphStorage):
         except Exception as e:
             logger.error(f"Error dropping graph {self.namespace}: {e}")
             return {"status": "error", "message": str(e)}
+
+    async def get_node_count(self, file_id: str) -> int:
+        """Find and count nodes by file_id.
+        
+        Args:
+            file_id: The file ID to search for
+            
+        Returns:
+            The count of nodes that have the specified file_id
+        """
+        graph = await self._get_graph()
+        count = 0
+        for node in graph.nodes():
+            node_data = graph.nodes[node]
+            # Check if the node has file_id attribute matching the given file_id
+            if node_data.get("file_id") == file_id or node_data.get("source_id") == file_id:
+                count += 1
+        logger.debug(f"Found {count} nodes with file_id: {file_id}")
+        return count
+
+    async def get_edge_count(self, file_id: str) -> int:
+        """Get edge count by file_id.
+        
+        Args:
+            file_id: The file ID to search for
+            
+        Returns:
+            The count of edges that have the specified file_id
+        """
+        graph = await self._get_graph()
+        count = 0
+        for source, target in graph.edges():
+            edge_data = graph.edges[(source, target)]
+            # Check if the edge has file_id attribute matching the given file_id
+            if edge_data.get("file_id") == file_id or edge_data.get("source_id") == file_id:
+                count += 1
+        logger.debug(f"Found {count} edges with file_id: {file_id}")
+        return count
+
+    async def remove_filepath_by_file_id(self, file_id: str) -> None:
+        """Remove file_id references from nodes and edges.
+        
+        This method removes the file_id attribute from all nodes and edges
+        that have the specified file_id.
+        
+        Args:
+            file_id: The file ID to remove
+        """
+        graph = await self._get_graph()
+        nodes_modified = 0
+        edges_modified = 0
+        
+        # Remove file_id from nodes
+        for node in graph.nodes():
+            node_data = graph.nodes[node]
+            if node_data.get("file_id") == file_id:
+                del node_data["file_id"]
+                nodes_modified += 1
+            if node_data.get("source_id") == file_id:
+                del node_data["source_id"]
+                nodes_modified += 1
+        
+        # Remove file_id from edges
+        for source, target in graph.edges():
+            edge_data = graph.edges[(source, target)]
+            if edge_data.get("file_id") == file_id:
+                del edge_data["file_id"]
+                edges_modified += 1
+            if edge_data.get("source_id") == file_id:
+                del edge_data["source_id"]
+                edges_modified += 1
+        
+        logger.info(f"Removed file_id {file_id} from {nodes_modified} nodes and {edges_modified} edges")
+

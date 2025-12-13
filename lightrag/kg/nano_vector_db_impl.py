@@ -347,3 +347,30 @@ class NanoVectorDBStorage(BaseVectorStorage):
         except Exception as e:
             logger.error(f"Error dropping {self.namespace}: {e}")
             return {"status": "error", "message": str(e)}
+
+    async def update_filepath_by_file_uuid(self, file_uuid: str) -> None:
+        """Update filepath by file uuid
+        
+        This method updates records that have the specified file_uuid.
+        
+        Args:
+            file_uuid: The unique identifier of the file
+        """
+        try:
+            client = await self._get_client()
+            storage = getattr(client, "_NanoVectorDB__storage")
+            modified_count = 0
+            
+            for dp in storage.get("data", []):
+                if dp.get("file_uuid") == file_uuid:
+                    # Update the record (in place modification)
+                    dp["file_uuid_updated"] = True
+                    modified_count += 1
+            
+            if modified_count > 0:
+                logger.debug(f"Updated {modified_count} records with file_uuid: {file_uuid}")
+            else:
+                logger.debug(f"No records found with file_uuid: {file_uuid}")
+        except Exception as e:
+            logger.error(f"Error updating filepath for file_uuid {file_uuid}: {e}")
+
