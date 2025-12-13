@@ -1396,8 +1396,20 @@ class LightRAG:
         # 定义一个内部包装器来处理流和资源清理
         async def _aquery_stream_wrapper(iterator: AsyncIterator[str]) -> AsyncIterator[str]:
             """Wraps the stream to ensure cleanup is called."""
+            has_logged_request_id = False
             try:
                 async for chunk in iterator:
+                    if not has_logged_request_id:
+                        request_id = None
+                        if hasattr(chunk, 'headers') and chunk.headers:
+                            request_id = chunk.headers.get('x-request-id')
+                        elif hasattr(chunk, 'request_id'):
+                            request_id = chunk.request_id
+
+                        if request_id:
+                            logger.info(f"x-request-id: {request_id}")
+                            has_logged_request_id = True
+
                     yield chunk
             finally:
                 await self._query_done()

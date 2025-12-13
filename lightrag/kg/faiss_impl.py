@@ -87,7 +87,7 @@ class FaissVectorDBStorage(BaseVectorStorage):
                 self.storage_updated.value = False
             return self._index
 
-    async def upsert(self, data: dict[str, dict[str, Any]]) -> None:
+    async def upsert(self, data: dict[str, dict[str, Any]], build_vector_index: bool = True) -> None:
         """
         Insert or update vectors in the Faiss index.
 

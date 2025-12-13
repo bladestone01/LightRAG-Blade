@@ -9,6 +9,14 @@ class GPTKeywordExtractionFormat(BaseModel):
     low_level_keywords: list[str]
 
 
+class ModelResponse(str):
+    def __new__(cls, content, headers=None, request_id=None):
+        obj = str.__new__(cls, content)
+        obj.headers = headers or {}
+        obj.request_id = request_id
+        return obj
+
+
 class KnowledgeGraphNode(BaseModel):
     id: str
     labels: list[str]

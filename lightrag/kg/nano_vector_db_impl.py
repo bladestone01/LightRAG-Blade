@@ -77,7 +77,7 @@ class NanoVectorDBStorage(BaseVectorStorage):
 
             return self._client
 
-    async def upsert(self, data: dict[str, dict[str, Any]]) -> None:
+    async def upsert(self, data: dict[str, dict[str, Any]], build_vector_index: bool = True) -> None:
         """
         Importance notes:
         1. Changes will be persisted to disk during the next index_done_callback

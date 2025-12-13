@@ -31,7 +31,7 @@ from lightrag.utils import (
     safe_unicode_decode,
     logger,
 )
-from lightrag.types import GPTKeywordExtractionFormat
+from lightrag.types import GPTKeywordExtractionFormat, ModelResponse
 from lightrag.api import __api_version__
 
 import numpy as np
@@ -210,6 +210,10 @@ async def openai_complete_if_cache(
         async def inner():
             # Track if we've started iterating
             iteration_started = False
+            request_id = None
+            if hasattr(response, "response") and hasattr(response.response, "headers"):
+                request_id = response.response.headers.get("x-request-id")
+
             try:
                 iteration_started = True
                 async for chunk in response:
@@ -231,7 +235,7 @@ async def openai_complete_if_cache(
                         continue
                     if r"\u" in content:
                         content = safe_unicode_decode(content.encode("utf-8"))
-                    yield content
+                    yield ModelResponse(content, request_id=request_id)
             except Exception as e:
                 logger.error(f"Error in stream response: {str(e)}")
                 # Try to clean up resources if possible

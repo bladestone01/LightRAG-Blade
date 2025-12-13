@@ -458,8 +458,7 @@ class TiDBVectorDBStorage(BaseVectorStorage):
             return []
         return results
 
-    ###### INSERT entities And relationships ######
-    async def upsert(self, data: dict[str, dict[str, Any]]) -> None:
+    async def upsert(self, data: dict[str, dict[str, Any]], build_vector_index: bool = True) -> None:
         logger.info(f"Inserting {len(data)} to {self.namespace}")
         if not data:
             return

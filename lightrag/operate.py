@@ -1518,8 +1518,8 @@ async def _get_node_data(
         f"Truncate entities from {len_node_datas} to {len(node_datas)} (max tokens:{query_param.max_token_for_local_context})"
     )
     logger.info(f"Neo4j Node Retrieval Results (After Truncation) (Count: {len(node_datas)}):")
-    for i, n in enumerate(node_datas):
-         logger.info(f"  [{i}] Node: {n['entity_name']}, Rank: {n.get('rank', 'N/A')}, Data: {json.dumps(n, ensure_ascii=False)}")
+    # for i, n in enumerate(node_datas):
+    #      logger.info(f"  [{i}] Node: {n['entity_name']}, Rank: {n.get('rank', 'N/A')}, Data: {json.dumps(n, ensure_ascii=False)}")
 
     logger.info(
         f"Local query uses {len(node_datas)} entites, {len(use_relations)} relations, {len(use_text_units)} chunks"
@@ -1784,8 +1784,8 @@ async def _find_most_related_edges_from_entities(
     )
 
     logger.info(f"Neo4j Edge Retrieval Results (After Truncation) (Count: {len(all_edges_data)}):")
-    for i, e in enumerate(all_edges_data):
-        logger.info(f"  [{i}] Edge: {e['src_tgt']}, Rank: {e.get('rank', 'N/A')}, Data: {json.dumps(e, ensure_ascii=False)}")
+    # for i, e in enumerate(all_edges_data):
+    #     logger.info(f"  [{i}] Edge: {e['src_tgt']}, Rank: {e.get('rank', 'N/A')}, Data: {json.dumps(e, ensure_ascii=False)}")
 
     return all_edges_data
 
